@@ -11,10 +11,13 @@ import {
   HelpCircle,
   BookOpen,
   Wrench,
+  BarChart3,
 } from "lucide-react";
+import ElectionChart from "../components/ElectionChart";
 
 export default function Dashboard() {
   const [currentScreen, setCurrentScreen] = useState("home");
+  const [selectedRound, setSelectedRound] = useState(1);
 
   const navItems = [
     {
@@ -22,6 +25,12 @@ export default function Dashboard() {
       icon: Home,
       label: "Home",
       active: currentScreen === "home",
+    },
+    {
+      id: "elections",
+      icon: BarChart3,
+      label: "Eleições 2022",
+      active: currentScreen === "elections",
     },
     {
       id: "map",
@@ -71,6 +80,73 @@ export default function Dashboard() {
     );
   };
 
+  const renderElectionsScreen = () => {
+    return (
+      <div className="flex flex-col h-full p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-[#2A2E45]">
+              Eleição Presidencial 2022
+            </h1>
+            <p className="text-sm text-[#8A8FA6] mt-1">
+              Visualize os resultados dos turnos da eleição presidencial
+            </p>
+          </div>
+
+          {/* Toggle de Turnos */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setSelectedRound(1)}
+              className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                selectedRound === 1
+                  ? "bg-[#1570FF] text-white shadow-md"
+                  : "bg-white text-[#6F7689] border border-[#E4E9F2] hover:border-[#1570FF]"
+              }`}
+            >
+              1º Turno
+            </button>
+            <button
+              onClick={() => setSelectedRound(2)}
+              className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                selectedRound === 2
+                  ? "bg-[#1570FF] text-white shadow-md"
+                  : "bg-white text-[#6F7689] border border-[#E4E9F2] hover:border-[#1570FF]"
+              }`}
+            >
+              2º Turno
+            </button>
+          </div>
+        </div>
+
+        {/* Gráfico */}
+        <div className="flex-1 bg-white rounded-lg border border-[#E4E9F2] shadow-sm min-h-[400px]">
+          <ElectionChart round={selectedRound} />
+        </div>
+
+        {/* Info Cards */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-white rounded-lg border border-[#E4E9F2] p-4">
+            <div className="text-[#8A8FA6] text-sm mb-1">Total de Votos</div>
+            <div className="text-2xl font-semibold text-[#2A2E45]">
+              {selectedRound === 1 ? "156M" : "121M"}
+            </div>
+          </div>
+          <div className="bg-white rounded-lg border border-[#E4E9F2] p-4">
+            <div className="text-[#8A8FA6] text-sm mb-1">Turno</div>
+            <div className="text-2xl font-semibold text-[#2A2E45]">
+              {selectedRound === 1 ? "Primeiro" : "Segundo"}
+            </div>
+          </div>
+          <div className="bg-white rounded-lg border border-[#E4E9F2] p-4">
+            <div className="text-[#8A8FA6] text-sm mb-1">Ano</div>
+            <div className="text-2xl font-semibold text-[#2A2E45]">2022</div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (currentScreen) {
       case "home":
@@ -78,6 +154,8 @@ export default function Dashboard() {
           "Bem-vindo ao Home",
           "Esta é a tela inicial da sua dashboard. Adicione aqui o conteúdo que desejar.",
         );
+      case "elections":
+        return renderElectionsScreen();
       case "map":
         return renderEmptyScreen(
           "Tela do Mapa",
