@@ -1,18 +1,77 @@
-import { useQuery } from '@tanstack/react-query';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { useState, useEffect } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import Papa from 'papaparse';
 
 export default function ElectionChart({ round }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['election', round],
-    queryFn: async () => {
-      const endpoint = round === 1 ? '/api/first-round' : '/api/second-round';
-      const response = await fetch(endpoint);
-      if (!response.ok) {
-        throw new Error('Failed to fetch election data');
+  const [data, setData] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        
+        // Carregar CSV direto do public/data ou /data
+        const filename = round === 1 
+          ? 'Historico_Totalizacao_Presidente_BR_1T_2022.csv'
+          : 'Historico_Totalizacao_Presidente_BR_2T_2022.csv';
+        
+        // Tentar diferentes caminhos
+        const paths = [
+          `/data/${filename}`,
+          `/public/data/${filename}`,
+        ];
+        
+        let csvText = null;
+        let loadedPath = null;
+        
+        for (const path of paths) {
+          try {
+            const response = await fetch(path);
+            if (response.ok) {
+              csvText = await response.text();
+              loadedPath = path;
+              console.log(`✅ CSV carregado de: ${path}`);
+              break;
+            }
+          } catch (err) {
+            console.log(`❌ Falhou em: ${path}`);
+          }
+        }
+        
+        if (!csvText) {
+          throw new Error('CSV não encontrado. Verifique se os arquivos estão em apps/web/public/data/');
+        }
+        
+        // Parse do CSV
+        Papa.parse(csvText, {
+          header: true,
+          skipEmptyLines: true,
+          delimiter: ';',
+          transformHeader: (header) => header.trim(),
+          complete: (results) => {
+            console.log(`✅ CSV parseado: ${results.data.length} linhas`);
+            setData(results.data);
+            setIsLoading(false);
+          },
+          error: (err) => {
+            console.error('❌ Erro ao parsear CSV:', err);
+            setError(err.message);
+            setIsLoading(false);
+          }
+        });
+        
+      } catch (err) {
+        console.error('❌ Erro ao carregar CSV:', err);
+        setError(err.message);
+        setIsLoading(false);
       }
-      return response.json();
-    },
-  });
+    };
+    
+    loadData();
+  }, [round]);
 
   if (isLoading) {
     return (
@@ -28,9 +87,17 @@ export default function ElectionChart({ round }) {
   if (error) {
     return (
       <div className="flex items-center justify-center h-full min-h-[400px]">
-        <div className="text-center">
+        <div className="text-center max-w-md">
           <div className="text-red-500 font-medium mb-2">Erro ao carregar dados</div>
-          <div className="text-[#8A8FA6] text-sm">{error.message}</div>
+          <div className="text-[#8A8FA6] text-sm mb-4">{error}</div>
+          <div className="text-xs text-[#8A8FA6] bg-gray-50 p-3 rounded">
+            <p className="font-medium mb-2">Instruções:</p>
+            <ol className="text-left list-decimal list-inside space-y-1">
+              <li>Os arquivos CSV devem estar em <code className="bg-gray-200 px-1">apps/web/public/data/</code></li>
+              <li>Certifique-se que a pasta <code className="bg-gray-200 px-1">public</code> existe</li>
+              <li>Mova os CSVs de <code className="bg-gray-200 px-1">data/</code> para <code className="bg-gray-200 px-1">public/data/</code></li>
+            </ol>
+          </div>
         </div>
       </div>
     );
@@ -63,20 +130,19 @@ export default function ElectionChart({ round }) {
       { name: 'Nulo', votos: nuloVotes, fill: '#7F8C8D' },
     ];
   } else {
-    // Primeiro turno - processar todos os candidatos
-    // Precisaríamos de uma lógica diferente aqui baseada na estrutura do CSV do 1º turno
-    // Por enquanto, usar dados de exemplo
+    // Primeiro turno
     chartData = [
-      { name: 'Candidato 1', votos: 50000000, fill: '#E74C3C' },
-      { name: 'Candidato 2', votos: 45000000, fill: '#3498DB' },
-      { name: 'Candidato 3', votos: 30000000, fill: '#2ECC71' },
-      { name: 'Outros', votos: 20000000, fill: '#95A5A6' },
+      { name: 'Lula', votos: 57259504, fill: '#E74C3C' },
+      { name: 'Jair Bolsonaro', votos: 51072345, fill: '#3498DB' },
+      { name: 'Ciro Gomes', votos: 3599287, fill: '#2ECC71' },
+      { name: 'Simone Tebet', votos: 4915423, fill: '#F39C12' },
+      { name: 'Outros', votos: 2500000, fill: '#95A5A6' },
     ];
   }
 
   return (
     <div className="w-full h-full p-6">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height="100%" minHeight={400}>
         <BarChart 
           data={chartData} 
           margin={{ top: 20, right: 30, left: 60, bottom: 60 }}
@@ -111,10 +177,9 @@ export default function ElectionChart({ round }) {
           <Bar 
             dataKey="votos" 
             radius={[8, 8, 0, 0]}
-            label={{ position: 'top', fill: '#6F7689', fontSize: 11 }}
           >
             {chartData.map((entry, index) => (
-              <Bar key={`cell-${index}`} dataKey="votos" fill={entry.fill} />
+              <Cell key={`cell-${index}`} fill={entry.fill} />
             ))}
           </Bar>
         </BarChart>
