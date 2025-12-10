@@ -7,6 +7,7 @@ import {
   Settings,
   Bell,
   Moon,
+  Sun,
   Globe,
   HelpCircle,
   BookOpen,
@@ -14,10 +15,12 @@ import {
   BarChart3,
 } from "lucide-react";
 import ElectionChart from "../components/ElectionChart";
+import { useDarkMode } from "../contexts/DarkModeContext";
 
 export default function Dashboard() {
   const [currentScreen, setCurrentScreen] = useState("home");
   const [selectedRound, setSelectedRound] = useState(1);
+  const { isDarkMode, toggleDarkMode } = useDarkMode();
 
   const navItems = [
     {
@@ -54,7 +57,11 @@ export default function Dashboard() {
 
   const moreItems = [
     { icon: Globe, label: "Idioma" },
-    { icon: Moon, label: "Modo Escuro" },
+    { 
+      icon: isDarkMode ? Sun : Moon, 
+      label: isDarkMode ? "Modo Claro" : "Modo Escuro",
+      onClick: toggleDarkMode 
+    },
     { icon: BookOpen, label: "Aprender" },
     { icon: HelpCircle, label: "Centro de Ajuda" },
     { icon: Wrench, label: "Suporte" },
@@ -68,13 +75,21 @@ export default function Dashboard() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-24 h-24 bg-[#EDF3FF] rounded-full flex items-center justify-center mx-auto mb-4">
-            <div className="w-12 h-12 bg-[#1570FF] rounded-full opacity-20"></div>
+          <div className={`w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4 ${
+            isDarkMode ? 'bg-[#2A2E45]' : 'bg-[#EDF3FF]'
+          }`}>
+            <div className={`w-12 h-12 rounded-full opacity-20 ${
+              isDarkMode ? 'bg-[#4A90E2]' : 'bg-[#1570FF]'
+            }`}></div>
           </div>
-          <h2 className="text-2xl font-semibold text-[#2A2E45] mb-2">
+          <h2 className={`text-2xl font-semibold mb-2 ${
+            isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+          }`}>
             {title}
           </h2>
-          <p className="text-[#8A8FA6] max-w-md">{description}</p>
+          <p className={isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'}>
+            {description}
+          </p>
         </div>
       </div>
     );
@@ -86,10 +101,14 @@ export default function Dashboard() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-[#2A2E45]">
+            <h1 className={`text-2xl font-semibold ${
+              isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+            }`}>
               Eleição Presidencial 2022
             </h1>
-            <p className="text-sm text-[#8A8FA6] mt-1">
+            <p className={`text-sm mt-1 ${
+              isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+            }`}>
               Visualize os resultados dos turnos da eleição presidencial
             </p>
           </div>
@@ -101,6 +120,8 @@ export default function Dashboard() {
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
                 selectedRound === 1
                   ? "bg-[#1570FF] text-white shadow-md"
+                  : isDarkMode
+                  ? "bg-[#2A2E45] text-[#B0B5C9] border border-[#3A3E55] hover:border-[#1570FF]"
                   : "bg-white text-[#6F7689] border border-[#E4E9F2] hover:border-[#1570FF]"
               }`}
             >
@@ -111,6 +132,8 @@ export default function Dashboard() {
               className={`px-4 py-2 rounded-lg font-medium text-sm transition-all ${
                 selectedRound === 2
                   ? "bg-[#1570FF] text-white shadow-md"
+                  : isDarkMode
+                  ? "bg-[#2A2E45] text-[#B0B5C9] border border-[#3A3E55] hover:border-[#1570FF]"
                   : "bg-white text-[#6F7689] border border-[#E4E9F2] hover:border-[#1570FF]"
               }`}
             >
@@ -120,27 +143,63 @@ export default function Dashboard() {
         </div>
 
         {/* Gráfico */}
-        <div className="flex-1 bg-white rounded-lg border border-[#E4E9F2] shadow-sm min-h-[400px]">
+        <div className={`flex-1 rounded-lg border shadow-sm min-h-[400px] ${
+          isDarkMode 
+            ? 'bg-[#2A2E45] border-[#3A3E55]' 
+            : 'bg-white border-[#E4E9F2]'
+        }`}>
           <ElectionChart round={selectedRound} />
         </div>
 
         {/* Info Cards */}
         <div className="grid grid-cols-3 gap-4">
-          <div className="bg-white rounded-lg border border-[#E4E9F2] p-4">
-            <div className="text-[#8A8FA6] text-sm mb-1">Total de Votos</div>
-            <div className="text-2xl font-semibold text-[#2A2E45]">
+          <div className={`rounded-lg border p-4 ${
+            isDarkMode 
+              ? 'bg-[#2A2E45] border-[#3A3E55]' 
+              : 'bg-white border-[#E4E9F2]'
+          }`}>
+            <div className={`text-sm mb-1 ${
+              isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+            }`}>
+              Total de Votos
+            </div>
+            <div className={`text-2xl font-semibold ${
+              isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+            }`}>
               {selectedRound === 1 ? "156M" : "121M"}
             </div>
           </div>
-          <div className="bg-white rounded-lg border border-[#E4E9F2] p-4">
-            <div className="text-[#8A8FA6] text-sm mb-1">Turno</div>
-            <div className="text-2xl font-semibold text-[#2A2E45]">
+          <div className={`rounded-lg border p-4 ${
+            isDarkMode 
+              ? 'bg-[#2A2E45] border-[#3A3E55]' 
+              : 'bg-white border-[#E4E9F2]'
+          }`}>
+            <div className={`text-sm mb-1 ${
+              isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+            }`}>
+              Turno
+            </div>
+            <div className={`text-2xl font-semibold ${
+              isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+            }`}>
               {selectedRound === 1 ? "Primeiro" : "Segundo"}
             </div>
           </div>
-          <div className="bg-white rounded-lg border border-[#E4E9F2] p-4">
-            <div className="text-[#8A8FA6] text-sm mb-1">Ano</div>
-            <div className="text-2xl font-semibold text-[#2A2E45]">2022</div>
+          <div className={`rounded-lg border p-4 ${
+            isDarkMode 
+              ? 'bg-[#2A2E45] border-[#3A3E55]' 
+              : 'bg-white border-[#E4E9F2]'
+          }`}>
+            <div className={`text-sm mb-1 ${
+              isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+            }`}>
+              Ano
+            </div>
+            <div className={`text-2xl font-semibold ${
+              isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+            }`}>
+              2022
+            </div>
           </div>
         </div>
       </div>
@@ -180,30 +239,50 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex h-screen bg-white font-inter">
+    <div className={`flex h-screen font-inter ${
+      isDarkMode ? 'bg-[#212529]' : 'bg-white'
+    }`}>
       {/* Left Sidebar */}
-      <div className="w-60 bg-[#F7F9FC] flex flex-col">
+      <div className={`w-60 flex flex-col ${
+        isDarkMode ? 'bg-[#1A1D21]' : 'bg-[#F7F9FC]'
+      }`}>
         {/* User Card */}
         <div className="m-4 mb-6">
-          <div className="bg-white rounded border border-[#E4E9F2] h-[72px] flex items-center px-4">
-            <div className="w-8 h-8 bg-[#EDF3FF] rounded-full flex items-center justify-center text-[#1570FF] font-semibold text-sm">
+          <div className={`rounded border h-[72px] flex items-center px-4 ${
+            isDarkMode 
+              ? 'bg-[#2A2E45] border-[#3A3E55]' 
+              : 'bg-white border-[#E4E9F2]'
+          }`}>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-sm ${
+              isDarkMode 
+                ? 'bg-[#3A3E55] text-[#4A90E2]' 
+                : 'bg-[#EDF3FF] text-[#1570FF]'
+            }`}>
               U
             </div>
             <div className="ml-3 flex-1">
-              <div className="font-semibold text-sm text-[#2A2E45]">
+              <div className={`font-semibold text-sm ${
+                isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+              }`}>
                 Usuário
               </div>
-              <div className="text-[11px] text-[#8A8FA6]">
+              <div className={`text-[11px] ${
+                isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+              }`}>
                 usuario@email.com
               </div>
             </div>
-            <ChevronDown className="w-3 h-3 text-[#8A8FA6]" />
+            <ChevronDown className={`w-3 h-3 ${
+              isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+            }`} />
           </div>
         </div>
 
         {/* Navigation */}
         <div className="flex-1 px-4">
-          <div className="text-[11px] font-semibold text-[#8A8FA6] uppercase tracking-wider py-2">
+          <div className={`text-[11px] font-semibold uppercase tracking-wider py-2 ${
+            isDarkMode ? 'text-[#8A8FA6]' : 'text-[#8A8FA6]'
+          }`}>
             Navegação
           </div>
 
@@ -215,6 +294,8 @@ export default function Dashboard() {
                 className={`h-9 flex items-center px-3 rounded cursor-pointer transition-colors ${
                   item.active
                     ? "bg-[#1570FF] text-white"
+                    : isDarkMode
+                    ? "text-[#B0B5C9] hover:bg-[#2A2E45]"
                     : "text-[#2A2E45] hover:bg-[#EDF3FF]"
                 }`}
               >
@@ -226,7 +307,9 @@ export default function Dashboard() {
 
           {/* More Section */}
           <div className="mt-6">
-            <div className="text-[11px] font-semibold text-[#8A8FA6] uppercase tracking-wider py-2">
+            <div className={`text-[11px] font-semibold uppercase tracking-wider py-2 ${
+              isDarkMode ? 'text-[#8A8FA6]' : 'text-[#8A8FA6]'
+            }`}>
               Mais
             </div>
 
@@ -234,9 +317,16 @@ export default function Dashboard() {
               {moreItems.map((item, index) => (
                 <div
                   key={index}
-                  className="h-9 flex items-center px-3 rounded cursor-pointer text-[#2A2E45] hover:bg-[#EDF3FF] transition-colors"
+                  onClick={item.onClick}
+                  className={`h-9 flex items-center px-3 rounded cursor-pointer transition-colors ${
+                    isDarkMode
+                      ? "text-[#B0B5C9] hover:bg-[#2A2E45]"
+                      : "text-[#2A2E45] hover:bg-[#EDF3FF]"
+                  }`}
                 >
-                  <item.icon className="w-4 h-4 mr-3 text-[#6F7689]" />
+                  <item.icon className={`w-4 h-4 mr-3 ${
+                    isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                  }`} />
                   <span className="text-sm">{item.label}</span>
                 </div>
               ))}
@@ -246,7 +336,9 @@ export default function Dashboard() {
 
         {/* Footer */}
         <div className="p-4">
-          <div className="text-[11px] text-[#8A8FA6] text-center">
+          <div className={`text-[11px] text-center ${
+            isDarkMode ? 'text-[#8A8FA6]' : 'text-[#8A8FA6]'
+          }`}>
             © 2024 Minha Dashboard
           </div>
         </div>
@@ -255,15 +347,23 @@ export default function Dashboard() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
         {/* Top Bar */}
-        <div className="h-14 bg-white border-b border-[#E4E9F2] flex items-center px-6">
+        <div className={`h-14 border-b flex items-center px-6 ${
+          isDarkMode 
+            ? 'bg-[#1A1D21] border-[#3A3E55]' 
+            : 'bg-white border-[#E4E9F2]'
+        }`}>
           {/* Brand */}
-          <div className="font-bold text-base text-[#2A2E45] mr-8">
+          <div className={`font-bold text-base mr-8 ${
+            isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+          }`}>
             Dashboard
           </div>
 
           {/* Current Screen Title */}
           <div className="flex-1">
-            <h1 className="text-sm text-[#6F7689] capitalize">
+            <h1 className={`text-sm capitalize ${
+              isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
+            }`}>
               {navItems.find((item) => item.id === currentScreen)?.label ||
                 "Dashboard"}
             </h1>
@@ -271,20 +371,43 @@ export default function Dashboard() {
 
           {/* Right Controls */}
           <div className="flex items-center space-x-3">
-            <button className="w-8 h-8 bg-white border border-[#E4E9F2] rounded-full flex items-center justify-center hover:bg-[#EDF3FF] transition-colors">
-              <Bell className="w-4 h-4 text-[#6F7689]" />
+            <button className={`w-8 h-8 border rounded-full flex items-center justify-center transition-colors ${
+              isDarkMode 
+                ? 'bg-[#2A2E45] border-[#3A3E55] hover:bg-[#3A3E55]' 
+                : 'bg-white border-[#E4E9F2] hover:bg-[#EDF3FF]'
+            }`}>
+              <Bell className={`w-4 h-4 ${
+                isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
+              }`} />
             </button>
-            <button className="w-8 h-8 bg-white border border-[#E4E9F2] rounded-full flex items-center justify-center hover:bg-[#EDF3FF] transition-colors">
-              <Settings className="w-4 h-4 text-[#6F7689]" />
+            <button 
+              onClick={toggleDarkMode}
+              className={`w-8 h-8 border rounded-full flex items-center justify-center transition-colors ${
+                isDarkMode 
+                  ? 'bg-[#2A2E45] border-[#3A3E55] hover:bg-[#3A3E55]' 
+                  : 'bg-white border-[#E4E9F2] hover:bg-[#EDF3FF]'
+              }`}
+            >
+              {isDarkMode ? (
+                <Sun className="w-4 h-4 text-[#B0B5C9]" />
+              ) : (
+                <Moon className="w-4 h-4 text-[#6F7689]" />
+              )}
             </button>
-            <div className="w-8 h-8 bg-[#EDF3FF] rounded-full flex items-center justify-center text-[#1570FF] font-semibold text-sm">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-semibold text-sm ${
+              isDarkMode 
+                ? 'bg-[#3A3E55] text-[#4A90E2]' 
+                : 'bg-[#EDF3FF] text-[#1570FF]'
+            }`}>
               U
             </div>
           </div>
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 bg-[#FAFBFD] overflow-auto">
+        <div className={`flex-1 overflow-auto ${
+          isDarkMode ? 'bg-[#212529]' : 'bg-[#FAFBFD]'
+        }`}>
           {renderContent()}
         </div>
       </div>
