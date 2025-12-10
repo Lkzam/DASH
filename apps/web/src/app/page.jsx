@@ -233,6 +233,150 @@ function DashboardContent() {
     );
   };
 
+  const renderSettingsScreen = () => {
+    return (
+      <div className="flex flex-col h-full p-6 space-y-6 overflow-auto">
+        {/* Header */}
+        <div>
+          <h1 className={`text-2xl font-semibold ${
+            isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+          }`}>
+            Configurações da Conta
+          </h1>
+          <p className={`text-sm mt-1 ${
+            isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+          }`}>
+            Gerencie suas informações pessoais
+          </p>
+        </div>
+
+        {/* Card de Informações do Perfil */}
+        <div className={`rounded-lg border shadow-sm ${
+          isDarkMode 
+            ? 'bg-[#2A2E45] border-[#3A3E55]' 
+            : 'bg-white border-[#E4E9F2]'
+        }`}>
+          <div className={`p-4 border-b ${
+            isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'
+          }`}>
+            <h2 className={`text-lg font-semibold ${
+              isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+            }`}>
+              Informações do Perfil
+            </h2>
+          </div>
+          
+          <div className="p-4 space-y-4">
+            <div>
+              <label className={`block text-sm font-medium mb-2 ${
+                isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
+              }`}>
+                Nome de Exibição
+              </label>
+              <input
+                type="text"
+                defaultValue={displayName}
+                className={`w-full px-4 py-2 border rounded-lg outline-none transition-all ${
+                  isDarkMode
+                    ? 'bg-[#1A1D21] border-[#3A3E55] text-white focus:border-[#1570FF]'
+                    : 'bg-white border-[#E4E9F2] text-[#2A2E45] focus:ring-2 focus:ring-[#1570FF] focus:border-transparent'
+                }`}
+                placeholder="Seu nome"
+              />
+            </div>
+
+            <div>
+              <label className={`block text-sm font-medium mb-2 ${
+                isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
+              }`}>
+                Email
+              </label>
+              <input
+                type="email"
+                defaultValue={userEmail}
+                className={`w-full px-4 py-2 border rounded-lg outline-none transition-all ${
+                  isDarkMode
+                    ? 'bg-[#1A1D21] border-[#3A3E55] text-white focus:border-[#1570FF]'
+                    : 'bg-white border-[#E4E9F2] text-[#2A2E45] focus:ring-2 focus:ring-[#1570FF] focus:border-transparent'
+                }`}
+                placeholder="seu@email.com"
+              />
+            </div>
+
+            <div>
+              <label className={`block text-sm font-medium mb-2 ${
+                isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
+              }`}>
+                Telefone
+              </label>
+              <input
+                type="tel"
+                className={`w-full px-4 py-2 border rounded-lg outline-none transition-all ${
+                  isDarkMode
+                    ? 'bg-[#1A1D21] border-[#3A3E55] text-white focus:border-[#1570FF]'
+                    : 'bg-white border-[#E4E9F2] text-[#2A2E45] focus:ring-2 focus:ring-[#1570FF] focus:border-transparent'
+                }`}
+                placeholder="+55 (11) 98765-4321"
+              />
+            </div>
+
+            <button
+              className="flex items-center gap-2 bg-[#1570FF] text-white px-6 py-2 rounded-lg hover:bg-[#0D4FB8] transition-colors"
+            >
+              <Settings className="w-4 h-4" />
+              Salvar Alterações
+            </button>
+          </div>
+        </div>
+
+        {/* Informações da Conta */}
+        <div className={`rounded-lg border shadow-sm ${
+          isDarkMode 
+            ? 'bg-[#2A2E45] border-[#3A3E55]' 
+            : 'bg-white border-[#E4E9F2]'
+        }`}>
+          <div className="p-4">
+            <h3 className={`text-lg font-semibold mb-4 ${
+              isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+            }`}>
+              Informações da Conta
+            </h3>
+            <div className="space-y-3 text-sm">
+              <div className={`flex justify-between py-2 border-b ${
+                isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'
+              }`}>
+                <span className={isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'}>
+                  ID do Usuário:
+                </span>
+                <span className={`font-mono ${isDarkMode ? 'text-white' : 'text-[#2A2E45]'}`}>
+                  {user?.id?.slice(0, 8)}...
+                </span>
+              </div>
+              <div className={`flex justify-between py-2 border-b ${
+                isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'
+              }`}>
+                <span className={isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'}>
+                  Email:
+                </span>
+                <span className={isDarkMode ? 'text-white' : 'text-[#2A2E45]'}>
+                  {userEmail}
+                </span>
+              </div>
+              <div className="flex justify-between py-2">
+                <span className={isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'}>
+                  Nome:
+                </span>
+                <span className={isDarkMode ? 'text-white' : 'text-[#2A2E45]'}>
+                  {displayName}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (currentScreen) {
       case "home":
@@ -253,10 +397,7 @@ function DashboardContent() {
           "Configure aqui suas funcionalidades de busca e filtros.",
         );
       case "settings":
-        return renderEmptyScreen(
-          "Configurações",
-          "Adicione aqui as opções de configuração do seu sistema.",
-        );
+        return renderSettingsScreen();
       default:
         return renderEmptyScreen(
           "Dashboard",
