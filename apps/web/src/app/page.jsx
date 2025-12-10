@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ChevronDown,
   Home,
@@ -19,6 +19,7 @@ import ElectionChart from "../components/ElectionChart";
 import { useDarkMode } from "../contexts/DarkModeContext";
 import { useAuth } from "../contexts/AuthContext";
 import ProtectedRoute from "../components/ProtectedRoute";
+import { supabase } from "../lib/supabaseClient";
 
 function DashboardContent() {
   const [currentScreen, setCurrentScreen] = useState("home");
@@ -26,9 +27,84 @@ function DashboardContent() {
   const { isDarkMode, toggleDarkMode } = useDarkMode();
   const { user, signOut } = useAuth();
 
+  // Estados para a tela de configurações
+  const [formData, setFormData] = useState({
+    displayName: '',
+    email: '',
+    phone: '',
+  });
+  const [message, setMessage] = useState({ type: '', text: '' });
+  const [isSaving, setIsSaving] = useState(false);
+
   // Extrair dados do usuário
   const userEmail = user?.email || 'usuario@email.com';
   const displayName = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Usuário';
+
+  // Atualizar formData quando o usuário mudar
+  useEffect(() => {
+    setFormData({
+      displayName: displayName,
+      email: userEmail,
+      phone: user?.phone || '',
+    });
+  }, [user, displayName, userEmail]);
+
+  const showMessage = (type, text) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage({ type: '', text: '' }), 5000);
+  };
+
+  const handleSaveProfile = async () => {
+    setIsSaving(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        data: { 
+          display_name: formData.displayName 
+        }
+      });
+
+      if (error) throw error;
+      showMessage('success', 'Nome atualizado com sucesso!');
+    } catch (error) {
+      showMessage('error', error.message || 'Erro ao atualizar nome');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveEmail = async () => {
+    if (!formData.email || formData.email === userEmail) return;
+    
+    setIsSaving(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        email: formData.email
+      });
+
+      if (error) throw error;
+      showMessage('success', 'Email atualizado! Verifique seu email para confirmar.');
+    } catch (error) {
+      showMessage('error', error.message || 'Erro ao atualizar email');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSavePhone = async () => {
+    setIsSaving(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        phone: formData.phone
+      });
+
+      if (error) throw error;
+      showMessage('success', 'Telefone atualizado com sucesso!');
+    } catch (error) {
+      showMessage('error', error.message || 'Erro ao atualizar telefone');
+    } finally {
+      setIsSaving(false);
+    }
+  };
   
   // Pegar iniciais para o avatar
   const getInitials = (name) => {
@@ -250,7 +326,18 @@ function DashboardContent() {
           </p>
         </div>
 
-        {/* Card de Informações do Perfil */}
+        {/* Mensagem de Feedback */}
+        {message.text && (
+          <div className={`px-4 py-3 rounded-lg ${
+            message.type === 'success' 
+              ? 'bg-green-50 text-green-600 border border-green-200' 
+              : 'bg-red-50 text-red-600 border border-red-200'
+          }`}>
+            {message.text}
+          </div>
+        )}
+
+        {/* Card de Nome */}
         <div className={`rounded-lg border shadow-sm ${
           isDarkMode 
             ? 'bg-[#2A2E45] border-[#3A3E55]' 
@@ -262,7 +349,7 @@ function DashboardContent() {
             <h2 className={`text-lg font-semibold ${
               isDarkMode ? 'text-white' : 'text-[#2A2E45]'
             }`}>
-              Informações do Perfil
+              Nome de Exibição
             </h2>
           </div>
           
@@ -271,11 +358,12 @@ function DashboardContent() {
               <label className={`block text-sm font-medium mb-2 ${
                 isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
               }`}>
-                Nome de Exibição
+                Nome
               </label>
               <input
                 type="text"
-                defaultValue={displayName}
+                value={formData.displayName}
+                onChange={(e) => setFormData({...formData, displayName: e.target.value})}
                 className={`w-full px-4 py-2 border rounded-lg outline-none transition-all ${
                   isDarkMode
                     ? 'bg-[#1A1D21] border-[#3A3E55] text-white focus:border-[#1570FF]'
@@ -285,15 +373,44 @@ function DashboardContent() {
               />
             </div>
 
+            <button
+              onClick={handleSaveProfile}
+              disabled={isSaving}
+              className="flex items-center gap-2 bg-[#1570FF] text-white px-6 py-2 rounded-lg hover:bg-[#0D4FB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Settings className="w-4 h-4" />
+              {isSaving ? 'Salvando...' : 'Salvar Nome'}
+            </button>
+          </div>
+        </div>
+
+        {/* Card de Email */}
+        <div className={`rounded-lg border shadow-sm ${
+          isDarkMode 
+            ? 'bg-[#2A2E45] border-[#3A3E55]' 
+            : 'bg-white border-[#E4E9F2]'
+        }`}>
+          <div className={`p-4 border-b ${
+            isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'
+          }`}>
+            <h2 className={`text-lg font-semibold ${
+              isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+            }`}>
+              Email
+            </h2>
+          </div>
+          
+          <div className="p-4 space-y-4">
             <div>
               <label className={`block text-sm font-medium mb-2 ${
                 isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
               }`}>
-                Email
+                Endereço de Email
               </label>
               <input
                 type="email"
-                defaultValue={userEmail}
+                value={formData.email}
+                onChange={(e) => setFormData({...formData, email: e.target.value})}
                 className={`w-full px-4 py-2 border rounded-lg outline-none transition-all ${
                   isDarkMode
                     ? 'bg-[#1A1D21] border-[#3A3E55] text-white focus:border-[#1570FF]'
@@ -301,16 +418,51 @@ function DashboardContent() {
                 }`}
                 placeholder="seu@email.com"
               />
+              <p className={`text-xs mt-1 ${
+                isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+              }`}>
+                Um email de confirmação será enviado para o novo endereço
+              </p>
             </div>
 
+            <button
+              onClick={handleSaveEmail}
+              disabled={isSaving || formData.email === userEmail}
+              className="flex items-center gap-2 bg-[#1570FF] text-white px-6 py-2 rounded-lg hover:bg-[#0D4FB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Settings className="w-4 h-4" />
+              {isSaving ? 'Salvando...' : 'Salvar Email'}
+            </button>
+          </div>
+        </div>
+
+        {/* Card de Telefone */}
+        <div className={`rounded-lg border shadow-sm ${
+          isDarkMode 
+            ? 'bg-[#2A2E45] border-[#3A3E55]' 
+            : 'bg-white border-[#E4E9F2]'
+        }`}>
+          <div className={`p-4 border-b ${
+            isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'
+          }`}>
+            <h2 className={`text-lg font-semibold ${
+              isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+            }`}>
+              Telefone
+            </h2>
+          </div>
+          
+          <div className="p-4 space-y-4">
             <div>
               <label className={`block text-sm font-medium mb-2 ${
                 isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
               }`}>
-                Telefone
+                Número de Telefone
               </label>
               <input
                 type="tel"
+                value={formData.phone}
+                onChange={(e) => setFormData({...formData, phone: e.target.value})}
                 className={`w-full px-4 py-2 border rounded-lg outline-none transition-all ${
                   isDarkMode
                     ? 'bg-[#1A1D21] border-[#3A3E55] text-white focus:border-[#1570FF]'
@@ -318,13 +470,20 @@ function DashboardContent() {
                 }`}
                 placeholder="+55 (11) 98765-4321"
               />
+              <p className={`text-xs mt-1 ${
+                isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+              }`}>
+                Formato: +55 DDD NÚMERO
+              </p>
             </div>
 
             <button
-              className="flex items-center gap-2 bg-[#1570FF] text-white px-6 py-2 rounded-lg hover:bg-[#0D4FB8] transition-colors"
+              onClick={handleSavePhone}
+              disabled={isSaving}
+              className="flex items-center gap-2 bg-[#1570FF] text-white px-6 py-2 rounded-lg hover:bg-[#0D4FB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Settings className="w-4 h-4" />
-              Salvar Alterações
+              {isSaving ? 'Salvando...' : 'Salvar Telefone'}
             </button>
           </div>
         </div>
