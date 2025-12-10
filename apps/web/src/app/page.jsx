@@ -13,14 +13,32 @@ import {
   BookOpen,
   Wrench,
   BarChart3,
+  LogOut,
 } from "lucide-react";
 import ElectionChart from "../components/ElectionChart";
 import { useDarkMode } from "../contexts/DarkModeContext";
+import { useAuth } from "../contexts/AuthContext";
+import ProtectedRoute from "../components/ProtectedRoute";
 
-export default function Dashboard() {
+function DashboardContent() {
   const [currentScreen, setCurrentScreen] = useState("home");
   const [selectedRound, setSelectedRound] = useState(1);
   const { isDarkMode, toggleDarkMode } = useDarkMode();
+  const { user, signOut } = useAuth();
+
+  // Extrair dados do usuário
+  const userEmail = user?.email || 'usuario@email.com';
+  const displayName = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Usuário';
+  
+  // Pegar iniciais para o avatar
+  const getInitials = (name) => {
+    return name
+      .split(' ')
+      .map(word => word[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
 
   const navItems = [
     {
@@ -65,6 +83,15 @@ export default function Dashboard() {
     { icon: BookOpen, label: "Aprender" },
     { icon: HelpCircle, label: "Centro de Ajuda" },
     { icon: Wrench, label: "Suporte" },
+    { 
+      icon: LogOut, 
+      label: "Sair",
+      onClick: async () => {
+        if (confirm('Deseja realmente sair?')) {
+          await signOut();
+        }
+      }
+    },
   ];
 
   const handleNavigation = (screenId) => {
@@ -258,21 +285,21 @@ export default function Dashboard() {
                 ? 'bg-[#3A3E55] text-[#4A90E2]' 
                 : 'bg-[#EDF3FF] text-[#1570FF]'
             }`}>
-              U
+              {getInitials(displayName)}
             </div>
-            <div className="ml-3 flex-1">
-              <div className={`font-semibold text-sm ${
+            <div className="ml-3 flex-1 min-w-0">
+              <div className={`font-semibold text-sm truncate ${
                 isDarkMode ? 'text-white' : 'text-[#2A2E45]'
-              }`}>
-                Usuário
+              }`} title={displayName}>
+                {displayName}
               </div>
-              <div className={`text-[11px] ${
+              <div className={`text-[11px] truncate ${
                 isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
-              }`}>
-                usuario@email.com
+              }`} title={userEmail}>
+                {userEmail}
               </div>
             </div>
-            <ChevronDown className={`w-3 h-3 ${
+            <ChevronDown className={`w-3 h-3 flex-shrink-0 ${
               isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
             }`} />
           </div>
@@ -399,7 +426,7 @@ export default function Dashboard() {
                 ? 'bg-[#3A3E55] text-[#4A90E2]' 
                 : 'bg-[#EDF3FF] text-[#1570FF]'
             }`}>
-              U
+              {getInitials(displayName)}
             </div>
           </div>
         </div>
@@ -412,5 +439,13 @@ export default function Dashboard() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <ProtectedRoute>
+      <DashboardContent />
+    </ProtectedRoute>
   );
 }
