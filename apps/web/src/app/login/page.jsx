@@ -68,7 +68,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo/Título */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">Dashboard</h1>
+          <h1 className="text-4xl font-bold text-white mb-2">OpinaAI</h1>
           <p className="text-blue-100">
             {isLogin ? 'Faça login para continuar' : 'Crie sua conta'}
           </p>
@@ -241,7 +241,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <div className="text-center mt-6 text-blue-100 text-sm">
-          © 2024 Dashboard - Todos os direitos reservados
+          © NovaIris - Todos os direitos reservados
         </div>
       </div>
     </div>

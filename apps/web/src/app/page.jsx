@@ -14,6 +14,8 @@ import {
   Wrench,
   BarChart3,
   LogOut,
+  Plus,
+  X,
 } from "lucide-react";
 import ElectionChart from "../components/ElectionChart";
 import { useDarkMode } from "../contexts/DarkModeContext";
@@ -36,6 +38,15 @@ function DashboardContent() {
   const [message, setMessage] = useState({ type: '', text: '' });
   const [isSaving, setIsSaving] = useState(false);
 
+  // Estado para saldo de moedas
+  const [saldoMoedas, setSaldoMoedas] = useState(null);
+  const [loadingSaldo, setLoadingSaldo] = useState(true);
+
+  // Estado para favoritos
+  const [favoritos, setFavoritos] = useState([]);
+  const [loadingFavoritos, setLoadingFavoritos] = useState(true);
+  const [showAddFavorito, setShowAddFavorito] = useState(false);
+
   // Extrair dados do usuário
   const userEmail = user?.email || 'usuario@email.com';
   const displayName = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Usuário';
@@ -48,6 +59,66 @@ function DashboardContent() {
       phone: user?.phone || '',
     });
   }, [user, displayName, userEmail]);
+
+  // Buscar saldo de moedas do usuário
+  useEffect(() => {
+    const fetchSaldoMoedas = async () => {
+      if (!user?.id) return;
+      
+      try {
+        setLoadingSaldo(true);
+        const { data, error } = await supabase
+          .from('moedas_usuario')
+          .select('saldo')
+          .eq('user_id', user.id)
+          .single();
+
+        if (error) {
+          console.error('Erro ao buscar saldo:', error);
+          setSaldoMoedas(0);
+        } else {
+          setSaldoMoedas(data?.saldo || 0);
+        }
+      } catch (err) {
+        console.error('Erro ao buscar saldo:', err);
+        setSaldoMoedas(0);
+      } finally {
+        setLoadingSaldo(false);
+      }
+    };
+
+    fetchSaldoMoedas();
+  }, [user?.id]);
+
+  // Buscar favoritos do usuário
+  useEffect(() => {
+    const fetchFavoritos = async () => {
+      if (!user?.id) return;
+      
+      try {
+        setLoadingFavoritos(true);
+        const { data, error } = await supabase
+          .from('favoritos_usuario')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true });
+
+        if (error) {
+          console.error('Erro ao buscar favoritos:', error);
+          setFavoritos([]);
+        } else {
+          setFavoritos(data || []);
+        }
+      } catch (err) {
+        console.error('Erro ao buscar favoritos:', err);
+        setFavoritos([]);
+      } finally {
+        setLoadingFavoritos(false);
+      }
+    };
+
+    fetchFavoritos();
+  }, [user?.id]);
 
   const showMessage = (type, text) => {
     setMessage({ type, text });
@@ -103,6 +174,62 @@ function DashboardContent() {
       showMessage('error', error.message || 'Erro ao atualizar telefone');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleAddFavorito = async (screenId) => {
+    try {
+      const navItem = navItems.find(item => item.id === screenId);
+      if (!navItem) return;
+
+      // Verifica se já existe
+      const jaExiste = favoritos.some(fav => fav.screen_id === screenId);
+      if (jaExiste) {
+        showMessage('error', 'Este item já está nos favoritos!');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('favoritos_usuario')
+        .insert({
+          user_id: user.id,
+          screen_id: screenId,
+          screen_label: navItem.label,
+        });
+
+      if (error) throw error;
+
+      // Atualiza a lista local
+      const { data } = await supabase
+        .from('favoritos_usuario')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true });
+
+      setFavoritos(data || []);
+      setShowAddFavorito(false);
+      showMessage('success', `"${navItem.label}" adicionado aos favoritos!`);
+    } catch (error) {
+      console.error('Erro ao adicionar favorito:', error);
+      showMessage('error', 'Erro ao adicionar favorito');
+    }
+  };
+
+  const handleRemoveFavorito = async (favoritoId) => {
+    try {
+      const { error } = await supabase
+        .from('favoritos_usuario')
+        .delete()
+        .eq('id', favoritoId);
+
+      if (error) throw error;
+
+      // Atualiza a lista local
+      setFavoritos(favoritos.filter(fav => fav.id !== favoritoId));
+      showMessage('success', 'Favorito removido!');
+    } catch (error) {
+      console.error('Erro ao remover favorito:', error);
+      showMessage('error', 'Erro ao remover favorito');
     }
   };
   
@@ -193,6 +320,253 @@ function DashboardContent() {
           <p className={isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'}>
             {description}
           </p>
+        </div>
+      </div>
+    );
+  };
+
+  const renderHomeScreen = () => {
+    return (
+      <div className="flex flex-col h-full p-6 space-y-6">
+        {/* Header */}
+        <div>
+          <h1 className={`text-2xl font-semibold ${
+            isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+          }`}>
+            Bem-vindo, {displayName}!
+          </h1>
+          <p className={`text-sm mt-1 ${
+            isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+          }`}>
+            Esta é a tela inicial da sua dashboard
+          </p>
+        </div>
+
+        {/* Card de Saldo de Moedas */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className={`rounded-lg border shadow-sm ${
+            isDarkMode 
+              ? 'bg-[#2A2E45] border-[#3A3E55]' 
+              : 'bg-white border-[#E4E9F2]'
+          }`}>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className={`text-sm font-medium ${
+                  isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+                }`}>
+                  Saldo de Moedas
+                </div>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                  isDarkMode ? 'bg-[#3A3E55]' : 'bg-[#EDF3FF]'
+                }`}>
+                  <span className="text-xl">💰</span>
+                </div>
+              </div>
+              
+              {loadingSaldo ? (
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 border-2 border-[#1570FF] border-t-transparent rounded-full animate-spin"></div>
+                  <span className={`text-sm ${
+                    isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+                  }`}>
+                    Carregando...
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <div className={`text-3xl font-bold mb-2 ${
+                    isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                  }`}>
+                    {saldoMoedas?.toLocaleString('pt-BR') || '0'}
+                  </div>
+                  <div className={`text-xs ${
+                    isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                  }`}>
+                    moedas disponíveis
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Card de Informações do Usuário */}
+          <div className={`rounded-lg border shadow-sm ${
+            isDarkMode 
+              ? 'bg-[#2A2E45] border-[#3A3E55]' 
+              : 'bg-white border-[#E4E9F2]'
+          }`}>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className={`text-sm font-medium ${
+                  isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+                }`}>
+                  Informações da Conta
+                </div>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                  isDarkMode ? 'bg-[#3A3E55]' : 'bg-[#EDF3FF]'
+                }`}>
+                  <span className="text-xl">👤</span>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <div>
+                  <div className={`text-xs ${
+                    isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                  }`}>
+                    Nome
+                  </div>
+                  <div className={`text-sm font-medium ${
+                    isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                  }`}>
+                    {displayName}
+                  </div>
+                </div>
+                <div>
+                  <div className={`text-xs ${
+                    isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                  }`}>
+                    Email
+                  </div>
+                  <div className={`text-sm font-medium truncate ${
+                    isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                  }`}>
+                    {userEmail}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Card de Favoritos */}
+          <div className={`rounded-lg border shadow-sm ${
+            isDarkMode 
+              ? 'bg-[#2A2E45] border-[#3A3E55]' 
+              : 'bg-white border-[#E4E9F2]'
+          }`}>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className={`text-sm font-medium ${
+                  isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+                }`}>
+                  ⭐ Favoritos
+                </div>
+                <button
+                  onClick={() => setShowAddFavorito(!showAddFavorito)}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+                    isDarkMode 
+                      ? 'bg-[#3A3E55] hover:bg-[#4A4E65] text-[#B0B5C9]' 
+                      : 'bg-[#EDF3FF] hover:bg-[#DDE7FF] text-[#1570FF]'
+                  }`}
+                  title="Adicionar favorito"
+                >
+                  {showAddFavorito ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                </button>
+              </div>
+              
+              {/* Modal para adicionar favorito */}
+              {showAddFavorito && (
+                <div className={`mb-4 p-3 rounded-lg border ${
+                  isDarkMode 
+                    ? 'bg-[#1A1D21] border-[#3A3E55]' 
+                    : 'bg-[#F7F9FC] border-[#E4E9F2]'
+                }`}>
+                  <div className={`text-xs font-medium mb-2 ${
+                    isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+                  }`}>
+                    Selecione uma aba:
+                  </div>
+                  <div className="space-y-1">
+                    {navItems
+                      .filter(item => !favoritos.some(fav => fav.screen_id === item.id))
+                      .map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => handleAddFavorito(item.id)}
+                          className={`w-full text-left px-2 py-1.5 rounded text-xs transition-colors flex items-center gap-2 ${
+                            isDarkMode
+                              ? 'hover:bg-[#2A2E45] text-[#B0B5C9]'
+                              : 'hover:bg-white text-[#2A2E45]'
+                          }`}
+                        >
+                          <item.icon className="w-3 h-3" />
+                          {item.label}
+                        </button>
+                      ))}
+                    {favoritos.length === navItems.length && (
+                      <div className={`text-xs text-center py-2 ${
+                        isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                      }`}>
+                        Todos os itens já estão nos favoritos
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Lista de favoritos */}
+              {loadingFavoritos ? (
+                <div className="flex items-center gap-2 py-2">
+                  <div className="w-4 h-4 border-2 border-[#1570FF] border-t-transparent rounded-full animate-spin"></div>
+                  <span className={`text-xs ${
+                    isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+                  }`}>
+                    Carregando...
+                  </span>
+                </div>
+              ) : favoritos.length === 0 ? (
+                <div className={`text-center py-4 ${
+                  isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                }`}>
+                  <div className="text-2xl mb-2">⭐</div>
+                  <div className="text-xs">
+                    Adicione suas abas favoritas
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                  {favoritos.map((favorito) => {
+                    const navItem = navItems.find(item => item.id === favorito.screen_id);
+                    return (
+                      <div
+                        key={favorito.id}
+                        className={`flex items-center justify-between px-3 py-2 rounded-lg transition-colors group ${
+                          isDarkMode
+                            ? 'hover:bg-[#3A3E55]'
+                            : 'hover:bg-[#EDF3FF]'
+                        }`}
+                      >
+                        <button
+                          onClick={() => handleNavigation(favorito.screen_id)}
+                          className="flex items-center gap-2 flex-1 text-left"
+                        >
+                          {navItem && <navItem.icon className={`w-4 h-4 ${
+                            isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
+                          }`} />}
+                          <span className={`text-sm font-medium ${
+                            isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                          }`}>
+                            {favorito.screen_label}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => handleRemoveFavorito(favorito.id)}
+                          className={`opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${
+                            isDarkMode
+                              ? 'hover:bg-[#4A4E65] text-red-400'
+                              : 'hover:bg-red-50 text-red-500'
+                          }`}
+                          title="Remover dos favoritos"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -539,10 +913,7 @@ function DashboardContent() {
   const renderContent = () => {
     switch (currentScreen) {
       case "home":
-        return renderEmptyScreen(
-          "Bem-vindo ao Home",
-          "Esta é a tela inicial da sua dashboard. Adicione aqui o conteúdo que desejar.",
-        );
+        return renderHomeScreen();
       case "elections":
         return renderElectionsScreen();
       case "map":
@@ -666,7 +1037,7 @@ function DashboardContent() {
           <div className={`text-[11px] text-center ${
             isDarkMode ? 'text-[#8A8FA6]' : 'text-[#8A8FA6]'
           }`}>
-            © 2024 Minha Dashboard
+            ©NovaIris
           </div>
         </div>
       </div>
@@ -683,7 +1054,7 @@ function DashboardContent() {
           <div className={`font-bold text-base mr-8 ${
             isDarkMode ? 'text-white' : 'text-[#2A2E45]'
           }`}>
-            Dashboard
+            OpinaAI
           </div>
 
           {/* Current Screen Title */}
