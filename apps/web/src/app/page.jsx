@@ -22,6 +22,7 @@ import { useDarkMode } from "../contexts/DarkModeContext";
 import { useAuth } from "../contexts/AuthContext";
 import ProtectedRoute from "../components/ProtectedRoute";
 import { supabase } from "../lib/supabaseClient";
+import { useNavigate } from "react-router-dom";
 
 function DashboardContent() {
   const [currentScreen, setCurrentScreen] = useState("home");
@@ -276,6 +277,8 @@ function DashboardContent() {
     },
   ];
 
+  const navigate = useNavigate();
+
   const moreItems = [
     { icon: Globe, label: "Idioma" },
     { 
@@ -285,7 +288,11 @@ function DashboardContent() {
     },
     { icon: BookOpen, label: "Aprender" },
     { icon: HelpCircle, label: "Centro de Ajuda" },
-    { icon: Wrench, label: "Suporte" },
+    { 
+      icon: Wrench, 
+      label: "Retaguarda",
+      onClick: () => navigate('/retaguarda')
+    },
     { 
       icon: LogOut, 
       label: "Sair",
@@ -1037,7 +1044,7 @@ function DashboardContent() {
           <div className={`text-[11px] text-center ${
             isDarkMode ? 'text-[#8A8FA6]' : 'text-[#8A8FA6]'
           }`}>
-            ©NovaIris
+            © NovaIris
           </div>
         </div>
       </div>
