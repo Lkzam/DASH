@@ -57,6 +57,13 @@ function RetaguardaDashboardContent() {
   const [perguntas, setPerguntas] = useState([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
 
+  // Estados para responder formulários
+  const [formulariosParaResponder, setFormulariosParaResponder] = useState([]);
+  const [loadingFormsParaResponder, setLoadingFormsParaResponder] = useState(true);
+  const [respondendoForm, setRespondendoForm] = useState(null);
+  const [perguntasForm, setPerguntasForm] = useState([]);
+  const [respostas, setRespostas] = useState({});
+
   const [message, setMessage] = useState({ type: "", text: "" });
 
   const displayName = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Gerente';
@@ -130,6 +137,33 @@ function RetaguardaDashboardContent() {
     fetchFormularios();
   }, [currentScreen, user?.id]);
 
+  // Buscar formulários ativos para responder
+  useEffect(() => {
+    const fetchFormulariosParaResponder = async () => {
+      if (currentScreen !== 'map') return;
+
+      try {
+        setLoadingFormsParaResponder(true);
+        const { data, error } = await supabase
+          .from('formularios')
+          .select('*')
+          .eq('criado_por', user.id)
+          .eq('ativo', true)
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        setFormulariosParaResponder(data || []);
+      } catch (err) {
+        console.error('Erro ao buscar formulários:', err);
+        showMessage('error', 'Erro ao carregar formulários');
+      } finally {
+        setLoadingFormsParaResponder(false);
+      }
+    };
+
+    fetchFormulariosParaResponder();
+  }, [currentScreen, user?.id]);
+
   const navItems = [
     {
       id: "home",
@@ -145,8 +179,8 @@ function RetaguardaDashboardContent() {
     },
     {
       id: "map",
-      icon: Map,
-      label: "Mapa",
+      icon: Eye,
+      label: "Responder",
       active: currentScreen === "map",
     },
     {
@@ -193,6 +227,7 @@ function RetaguardaDashboardContent() {
     setShowCreateForm(false);
     setEditingForm(null);
     setViewingForm(null);
+    setRespondendoForm(null);
   };
 
   const handleCreateForm = async () => {
@@ -206,40 +241,90 @@ function RetaguardaDashboardContent() {
       return;
     }
 
+    // Validar perguntas de múltipla escolha
+    for (const pergunta of perguntas) {
+      if ((pergunta.tipo === 'multipla_escolha' || pergunta.tipo === 'checkbox') && 
+          (!pergunta.opcoes || pergunta.opcoes.length === 0)) {
+        showMessage('error', `Adicione opções para a pergunta "${pergunta.texto}"`);
+        return;
+      }
+    }
+
     try {
-      // Criar formulário
-      const { data: formData, error: formError } = await supabase
-        .from('formularios')
-        .insert({
-          titulo: formTitle,
-          descricao: formDescription,
-          criado_por: user.id,
-          ativo: true,
-        })
-        .select()
-        .single();
+      if (editingForm) {
+        // EDITAR FORMULÁRIO EXISTENTE
+        const { error: formError } = await supabase
+          .from('formularios')
+          .update({
+            titulo: formTitle,
+            descricao: formDescription,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', editingForm.id);
 
-      if (formError) throw formError;
+        if (formError) throw formError;
 
-      // Criar perguntas
-      const perguntasComOrdem = perguntas.map((p, index) => ({
-        formulario_id: formData.id,
-        ordem: index + 1,
-        texto: p.texto,
-        tipo: p.tipo,
-        obrigatoria: p.obrigatoria,
-        opcoes: p.opcoes ? JSON.stringify(p.opcoes) : null,
-        validacao: p.validacao ? JSON.stringify(p.validacao) : null,
-      }));
+        // Deletar perguntas antigas
+        await supabase
+          .from('perguntas_formulario')
+          .delete()
+          .eq('formulario_id', editingForm.id);
 
-      const { error: perguntasError } = await supabase
-        .from('perguntas_formulario')
-        .insert(perguntasComOrdem);
+        // Inserir novas perguntas
+        const perguntasComOrdem = perguntas.map((p, index) => ({
+          formulario_id: editingForm.id,
+          ordem: index + 1,
+          texto: p.texto,
+          tipo: p.tipo,
+          obrigatoria: p.obrigatoria,
+          opcoes: (p.tipo === 'multipla_escolha' || p.tipo === 'checkbox') ? JSON.stringify(p.opcoes) : null,
+          validacao: p.validacao ? JSON.stringify(p.validacao) : null,
+        }));
 
-      if (perguntasError) throw perguntasError;
+        const { error: perguntasError } = await supabase
+          .from('perguntas_formulario')
+          .insert(perguntasComOrdem);
 
-      showMessage('success', 'Formulário criado com sucesso!');
+        if (perguntasError) throw perguntasError;
+
+        showMessage('success', 'Formulário atualizado com sucesso!');
+      } else {
+        // CRIAR NOVO FORMULÁRIO
+        const { data: formData, error: formError } = await supabase
+          .from('formularios')
+          .insert({
+            titulo: formTitle,
+            descricao: formDescription,
+            criado_por: user.id,
+            ativo: true,
+          })
+          .select()
+          .single();
+
+        if (formError) throw formError;
+
+        // Criar perguntas
+        const perguntasComOrdem = perguntas.map((p, index) => ({
+          formulario_id: formData.id,
+          ordem: index + 1,
+          texto: p.texto,
+          tipo: p.tipo,
+          obrigatoria: p.obrigatoria,
+          opcoes: (p.tipo === 'multipla_escolha' || p.tipo === 'checkbox') ? JSON.stringify(p.opcoes) : null,
+          validacao: p.validacao ? JSON.stringify(p.validacao) : null,
+        }));
+
+        const { error: perguntasError } = await supabase
+          .from('perguntas_formulario')
+          .insert(perguntasComOrdem);
+
+        if (perguntasError) throw perguntasError;
+
+        showMessage('success', 'Formulário criado com sucesso!');
+      }
+
       setShowCreateForm(false);
+      setEditingForm(null);
       setFormTitle('');
       setFormDescription('');
       setPerguntas([]);
@@ -253,8 +338,8 @@ function RetaguardaDashboardContent() {
       setFormularios(updatedForms || []);
 
     } catch (err) {
-      console.error('Erro ao criar formulário:', err);
-      showMessage('error', 'Erro ao criar formulário');
+      console.error('Erro ao salvar formulário:', err);
+      showMessage('error', 'Erro ao salvar formulário');
     }
   };
 
@@ -297,6 +382,118 @@ function RetaguardaDashboardContent() {
     } catch (err) {
       console.error('Erro ao excluir:', err);
       showMessage('error', 'Erro ao excluir formulário');
+    }
+  };
+
+  const handleEditForm = async (form) => {
+    try {
+      // Buscar perguntas do formulário
+      const { data: perguntasData, error } = await supabase
+        .from('perguntas_formulario')
+        .select('*')
+        .eq('formulario_id', form.id)
+        .order('ordem', { ascending: true });
+
+      if (error) throw error;
+
+      // Parsear opcoes de JSON para array
+      const perguntasParseadas = perguntasData.map(p => ({
+        ...p,
+        opcoes: p.opcoes ? JSON.parse(p.opcoes) : [],
+        validacao: p.validacao ? JSON.parse(p.validacao) : null,
+      }));
+
+      setEditingForm(form);
+      setFormTitle(form.titulo);
+      setFormDescription(form.descricao || '');
+      setPerguntas(perguntasParseadas);
+      setShowCreateForm(true);
+    } catch (err) {
+      console.error('Erro ao carregar formulário:', err);
+      showMessage('error', 'Erro ao carregar formulário');
+    }
+  };
+
+  const handleAddOpcao = (perguntaIndex) => {
+    const updated = [...perguntas];
+    if (!updated[perguntaIndex].opcoes) {
+      updated[perguntaIndex].opcoes = [];
+    }
+    updated[perguntaIndex].opcoes.push('');
+    setPerguntas(updated);
+  };
+
+  const handleRemoveOpcao = (perguntaIndex, opcaoIndex) => {
+    const updated = [...perguntas];
+    updated[perguntaIndex].opcoes.splice(opcaoIndex, 1);
+    setPerguntas(updated);
+  };
+
+  const handleUpdateOpcao = (perguntaIndex, opcaoIndex, value) => {
+    const updated = [...perguntas];
+    updated[perguntaIndex].opcoes[opcaoIndex] = value;
+    setPerguntas(updated);
+  };
+
+  const handleResponderForm = async (form) => {
+    try {
+      // Buscar perguntas do formulário
+      const { data: perguntasData, error } = await supabase
+        .from('perguntas_formulario')
+        .select('*')
+        .eq('formulario_id', form.id)
+        .order('ordem', { ascending: true });
+
+      if (error) throw error;
+
+      // Parsear opcoes
+      const perguntasParseadas = perguntasData.map(p => ({
+        ...p,
+        opcoes: p.opcoes ? JSON.parse(p.opcoes) : [],
+      }));
+
+      setRespondendoForm(form);
+      setPerguntasForm(perguntasParseadas);
+      setRespostas({});
+    } catch (err) {
+      console.error('Erro ao carregar formulário:', err);
+      showMessage('error', 'Erro ao carregar formulário');
+    }
+  };
+
+  const handleEnviarRespostas = async () => {
+    try {
+      // Validar respostas obrigatórias
+      for (const pergunta of perguntasForm) {
+        if (pergunta.obrigatoria && !respostas[pergunta.id]) {
+          showMessage('error', `A pergunta "${pergunta.texto}" é obrigatória`);
+          return;
+        }
+      }
+
+      // Criar array de respostas
+      const respostasArray = perguntasForm.map(p => ({
+        pergunta_id: p.id,
+        resposta: respostas[p.id] || '',
+      }));
+
+      const { error } = await supabase
+        .from('respostas_formulario')
+        .insert({
+          formulario_id: respondendoForm.id,
+          respondido_por: user.id,
+          respostas: JSON.stringify(respostasArray),
+        });
+
+      if (error) throw error;
+
+      showMessage('success', 'Resposta enviada com sucesso!');
+      setRespondendoForm(null);
+      setPerguntasForm([]);
+      setRespostas({});
+    } catch (err) {
+      console.error('Erro ao enviar respostas:', err);
+      showMessage('error', 'Erro ao enviar respostas');
     }
   };
 
@@ -485,10 +682,16 @@ function RetaguardaDashboardContent() {
             <h1 className={`text-2xl font-semibold ${
               isDarkMode ? 'text-white' : 'text-[#2A2E45]'
             }`}>
-              Criar Novo Formulário
+              {editingForm ? 'Editar Formulário' : 'Criar Novo Formulário'}
             </h1>
             <button
-              onClick={() => setShowCreateForm(false)}
+              onClick={() => {
+                setShowCreateForm(false);
+                setEditingForm(null);
+                setFormTitle('');
+                setFormDescription('');
+                setPerguntas([]);
+              }}
               className={`px-4 py-2 rounded-lg transition-colors ${
                 isDarkMode
                   ? 'bg-[#3A3E55] hover:bg-[#4A4E65] text-white'
@@ -599,7 +802,15 @@ function RetaguardaDashboardContent() {
                 <div className="grid grid-cols-2 gap-3">
                   <select
                     value={pergunta.tipo}
-                    onChange={(e) => handleUpdatePergunta(index, 'tipo', e.target.value)}
+                    onChange={(e) => {
+                      handleUpdatePergunta(index, 'tipo', e.target.value);
+                      // Inicializar array de opções se for múltipla escolha
+                      if (e.target.value === 'multipla_escolha' || e.target.value === 'checkbox') {
+                        if (!pergunta.opcoes || pergunta.opcoes.length === 0) {
+                          handleUpdatePergunta(index, 'opcoes', ['']);
+                        }
+                      }
+                    }}
                     className={`px-3 py-2 border rounded-lg outline-none ${
                       isDarkMode
                         ? 'bg-[#1A1D21] border-[#3A3E55] text-white'
@@ -631,6 +842,58 @@ function RetaguardaDashboardContent() {
                     </span>
                   </label>
                 </div>
+
+                {/* Opções para Múltipla Escolha / Checkbox */}
+                {(pergunta.tipo === 'multipla_escolha' || pergunta.tipo === 'checkbox') && (
+                  <div className={`p-3 rounded-lg space-y-2 ${
+                    isDarkMode ? 'bg-[#1A1D21]' : 'bg-[#F7F9FC]'
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-sm font-medium ${
+                        isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
+                      }`}>
+                        Opções de Resposta
+                      </span>
+                      <button
+                        onClick={() => handleAddOpcao(index)}
+                        className="flex items-center gap-1 text-[#1570FF] hover:text-[#0D4FB8] text-sm"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Adicionar Opção
+                      </button>
+                    </div>
+
+                    {pergunta.opcoes && pergunta.opcoes.map((opcao, opcaoIndex) => (
+                      <div key={opcaoIndex} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={opcao}
+                          onChange={(e) => handleUpdateOpcao(index, opcaoIndex, e.target.value)}
+                          placeholder={`Opção ${opcaoIndex + 1}`}
+                          className={`flex-1 px-3 py-2 border rounded-lg outline-none text-sm ${
+                            isDarkMode
+                              ? 'bg-[#2A2E45] border-[#3A3E55] text-white'
+                              : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+                          }`}
+                        />
+                        <button
+                          onClick={() => handleRemoveOpcao(index, opcaoIndex)}
+                          className="text-red-500 hover:text-red-600 p-1"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+
+                    {(!pergunta.opcoes || pergunta.opcoes.length === 0) && (
+                      <div className={`text-center py-2 text-sm ${
+                        isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                      }`}>
+                        Clique em "Adicionar Opção" para criar opções de resposta
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
 
@@ -650,10 +913,16 @@ function RetaguardaDashboardContent() {
               className="flex items-center gap-2 bg-[#1570FF] text-white px-6 py-3 rounded-lg hover:bg-[#0D4FB8] transition-colors"
             >
               <Save className="w-5 h-5" />
-              Salvar Formulário
+              {editingForm ? 'Salvar Alterações' : 'Salvar Formulário'}
             </button>
             <button
-              onClick={() => setShowCreateForm(false)}
+              onClick={() => {
+                setShowCreateForm(false);
+                setEditingForm(null);
+                setFormTitle('');
+                setFormDescription('');
+                setPerguntas([]);
+              }}
               className={`px-6 py-3 rounded-lg transition-colors ${
                 isDarkMode
                   ? 'bg-[#3A3E55] hover:bg-[#4A4E65] text-white'
@@ -747,6 +1016,17 @@ function RetaguardaDashboardContent() {
 
                 <div className="flex gap-2">
                   <button
+                    onClick={() => handleEditForm(form)}
+                    className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                      isDarkMode
+                        ? 'bg-blue-900/30 hover:bg-blue-900/50 text-blue-400'
+                        : 'bg-blue-50 hover:bg-blue-100 text-blue-600'
+                    }`}
+                  >
+                    <Edit className="w-4 h-4" />
+                    Editar
+                  </button>
+                  <button
                     onClick={() => handleDeleteForm(form.id)}
                     className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg transition-colors ${
                       isDarkMode
@@ -758,6 +1038,306 @@ function RetaguardaDashboardContent() {
                     Excluir
                   </button>
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderMapScreen = () => {
+    // Se está respondendo um formulário
+    if (respondendoForm) {
+      return (
+        <div className="flex flex-col h-full p-6 space-y-6 overflow-auto">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className={`text-2xl font-semibold ${
+                isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+              }`}>
+                {respondendoForm.titulo}
+              </h1>
+              {respondendoForm.descricao && (
+                <p className={`text-sm mt-1 ${
+                  isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+                }`}>
+                  {respondendoForm.descricao}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                setRespondendoForm(null);
+                setPerguntasForm([]);
+                setRespostas({});
+              }}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                isDarkMode
+                  ? 'bg-[#3A3E55] hover:bg-[#4A4E65] text-white'
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Perguntas do Formulário */}
+          <div className="space-y-4">
+            {perguntasForm.map((pergunta, index) => (
+              <div
+                key={pergunta.id}
+                className={`rounded-lg border p-6 space-y-3 ${
+                  isDarkMode
+                    ? 'bg-[#2A2E45] border-[#3A3E55]'
+                    : 'bg-white border-[#E4E9F2]'
+                }`}
+              >
+                <label className={`block text-sm font-medium ${
+                  isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                }`}>
+                  {index + 1}. {pergunta.texto}
+                  {pergunta.obrigatoria && <span className="text-red-500 ml-1">*</span>}
+                </label>
+
+                {/* Renderizar input baseado no tipo */}
+                {pergunta.tipo === 'texto' && (
+                  <input
+                    type="text"
+                    value={respostas[pergunta.id] || ''}
+                    onChange={(e) => setRespostas({...respostas, [pergunta.id]: e.target.value})}
+                    className={`w-full px-4 py-2 border rounded-lg outline-none ${
+                      isDarkMode
+                        ? 'bg-[#1A1D21] border-[#3A3E55] text-white'
+                        : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+                    }`}
+                    placeholder="Sua resposta..."
+                  />
+                )}
+
+                {pergunta.tipo === 'textarea' && (
+                  <textarea
+                    value={respostas[pergunta.id] || ''}
+                    onChange={(e) => setRespostas({...respostas, [pergunta.id]: e.target.value})}
+                    rows={4}
+                    className={`w-full px-4 py-2 border rounded-lg outline-none resize-none ${
+                      isDarkMode
+                        ? 'bg-[#1A1D21] border-[#3A3E55] text-white'
+                        : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+                    }`}
+                    placeholder="Sua resposta..."
+                  />
+                )}
+
+                {pergunta.tipo === 'numero' && (
+                  <input
+                    type="number"
+                    value={respostas[pergunta.id] || ''}
+                    onChange={(e) => setRespostas({...respostas, [pergunta.id]: e.target.value})}
+                    className={`w-full px-4 py-2 border rounded-lg outline-none ${
+                      isDarkMode
+                        ? 'bg-[#1A1D21] border-[#3A3E55] text-white'
+                        : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+                    }`}
+                    placeholder="Número..."
+                  />
+                )}
+
+                {pergunta.tipo === 'email' && (
+                  <input
+                    type="email"
+                    value={respostas[pergunta.id] || ''}
+                    onChange={(e) => setRespostas({...respostas, [pergunta.id]: e.target.value})}
+                    className={`w-full px-4 py-2 border rounded-lg outline-none ${
+                      isDarkMode
+                        ? 'bg-[#1A1D21] border-[#3A3E55] text-white'
+                        : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+                    }`}
+                    placeholder="email@exemplo.com"
+                  />
+                )}
+
+                {pergunta.tipo === 'telefone' && (
+                  <input
+                    type="tel"
+                    value={respostas[pergunta.id] || ''}
+                    onChange={(e) => setRespostas({...respostas, [pergunta.id]: e.target.value})}
+                    className={`w-full px-4 py-2 border rounded-lg outline-none ${
+                      isDarkMode
+                        ? 'bg-[#1A1D21] border-[#3A3E55] text-white'
+                        : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+                    }`}
+                    placeholder="(00) 00000-0000"
+                  />
+                )}
+
+                {pergunta.tipo === 'data' && (
+                  <input
+                    type="date"
+                    value={respostas[pergunta.id] || ''}
+                    onChange={(e) => setRespostas({...respostas, [pergunta.id]: e.target.value})}
+                    className={`w-full px-4 py-2 border rounded-lg outline-none ${
+                      isDarkMode
+                        ? 'bg-[#1A1D21] border-[#3A3E55] text-white'
+                        : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+                    }`}
+                  />
+                )}
+
+                {pergunta.tipo === 'hora' && (
+                  <input
+                    type="time"
+                    value={respostas[pergunta.id] || ''}
+                    onChange={(e) => setRespostas({...respostas, [pergunta.id]: e.target.value})}
+                    className={`w-full px-4 py-2 border rounded-lg outline-none ${
+                      isDarkMode
+                        ? 'bg-[#1A1D21] border-[#3A3E55] text-white'
+                        : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+                    }`}
+                  />
+                )}
+
+                {pergunta.tipo === 'multipla_escolha' && (
+                  <div className="space-y-2">
+                    {pergunta.opcoes && pergunta.opcoes.map((opcao, opcaoIndex) => (
+                      <label key={opcaoIndex} className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="radio"
+                          name={`pergunta-${pergunta.id}`}
+                          value={opcao}
+                          checked={respostas[pergunta.id] === opcao}
+                          onChange={(e) => setRespostas({...respostas, [pergunta.id]: e.target.value})}
+                          className="w-4 h-4"
+                        />
+                        <span className={`text-sm ${
+                          isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
+                        }`}>
+                          {opcao}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                {pergunta.tipo === 'checkbox' && (
+                  <div className="space-y-2">
+                    {pergunta.opcoes && pergunta.opcoes.map((opcao, opcaoIndex) => (
+                      <label key={opcaoIndex} className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          value={opcao}
+                          checked={(respostas[pergunta.id] || []).includes(opcao)}
+                          onChange={(e) => {
+                            const currentValues = respostas[pergunta.id] || [];
+                            const newValues = e.target.checked
+                              ? [...currentValues, opcao]
+                              : currentValues.filter(v => v !== opcao);
+                            setRespostas({...respostas, [pergunta.id]: newValues});
+                          }}
+                          className="w-4 h-4"
+                        />
+                        <span className={`text-sm ${
+                          isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
+                        }`}>
+                          {opcao}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Botão Enviar */}
+          <div className="flex gap-3 pt-4">
+            <button
+              onClick={handleEnviarRespostas}
+              className="flex items-center gap-2 bg-[#1570FF] text-white px-6 py-3 rounded-lg hover:bg-[#0D4FB8] transition-colors"
+            >
+              <Save className="w-5 h-5" />
+              Enviar Respostas
+            </button>
+            <button
+              onClick={() => {
+                setRespondendoForm(null);
+                setPerguntasForm([]);
+                setRespostas({});
+              }}
+              className={`px-6 py-3 rounded-lg transition-colors ${
+                isDarkMode
+                  ? 'bg-[#3A3E55] hover:bg-[#4A4E65] text-white'
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+              }`}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // Lista de formulários para responder
+    return (
+      <div className="flex flex-col h-full p-6 space-y-6">
+        <div>
+          <h1 className={`text-2xl font-semibold ${
+            isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+          }`}>
+            Responder Formulários
+          </h1>
+          <p className={`text-sm mt-1 ${
+            isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+          }`}>
+            Selecione um formulário para responder
+          </p>
+        </div>
+
+        {loadingFormsParaResponder ? (
+          <div className="flex items-center justify-center h-64">
+            <div className="w-12 h-12 border-4 border-[#1570FF] border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        ) : formulariosParaResponder.length === 0 ? (
+          <div className={`text-center py-16 ${
+            isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+          }`}>
+            <FileText className="w-16 h-16 mx-auto mb-4 opacity-50" />
+            <p className="text-lg font-medium mb-2">Nenhum formulário disponível</p>
+            <p className="text-sm">Crie formulários na aba "Formulários"</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {formulariosParaResponder.map((form) => (
+              <div
+                key={form.id}
+                className={`rounded-lg border shadow-sm p-6 ${
+                  isDarkMode
+                    ? 'bg-[#2A2E45] border-[#3A3E55]'
+                    : 'bg-white border-[#E4E9F2]'
+                }`}
+              >
+                <div className="mb-4">
+                  <h3 className={`font-semibold text-lg mb-1 ${
+                    isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                  }`}>
+                    {form.titulo}
+                  </h3>
+                  {form.descricao && (
+                    <p className={`text-sm line-clamp-2 ${
+                      isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+                    }`}>
+                      {form.descricao}
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => handleResponderForm(form)}
+                  className="w-full flex items-center justify-center gap-2 bg-[#1570FF] text-white px-4 py-2 rounded-lg hover:bg-[#0D4FB8] transition-colors"
+                >
+                  <FileText className="w-4 h-4" />
+                  Responder
+                </button>
               </div>
             ))}
           </div>
@@ -797,10 +1377,7 @@ function RetaguardaDashboardContent() {
       case "forms":
         return renderFormsScreen();
       case "map":
-        return renderEmptyScreen(
-          "Mapa",
-          "Funcionalidade em desenvolvimento"
-        );
+        return renderMapScreen();
       case "search":
         return renderEmptyScreen(
           "Pesquisa",
