@@ -17,6 +17,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import ElectionChart from "../components/ElectionChart";
 import { useDarkMode } from "../contexts/DarkModeContext";
 import { useAuth } from "../contexts/AuthContext";
@@ -47,6 +48,14 @@ function DashboardContent() {
   const [favoritos, setFavoritos] = useState([]);
   const [loadingFavoritos, setLoadingFavoritos] = useState(true);
   const [showAddFavorito, setShowAddFavorito] = useState(false);
+
+  // Estados para visualização de resultados de formulários
+  const [formulariosComRespostas, setFormulariosComRespostas] = useState([]);
+  const [loadingFormularios, setLoadingFormularios] = useState(false);
+  const [formularioSelecionado, setFormularioSelecionado] = useState(null);
+  const [respostasFormulario, setRespostasFormulario] = useState([]);
+  const [perguntasFormulario, setPerguntasFormulario] = useState([]);
+  const [loadingRespostas, setLoadingRespostas] = useState(false);
 
   // Extrair dados do usuário
   const userEmail = user?.email || 'usuario@email.com';
@@ -120,6 +129,50 @@ function DashboardContent() {
 
     fetchFavoritos();
   }, [user?.id]);
+
+  // Buscar formulários com respostas para a tela de pesquisa
+  useEffect(() => {
+    const fetchFormulariosComRespostas = async () => {
+      if (currentScreen !== 'search' || !user?.id) return;
+
+      try {
+        setLoadingFormularios(true);
+
+        // Buscar todos os formulários do usuário
+        const { data: formularios, error: formError } = await supabase
+          .from('formularios')
+          .select('*')
+          .eq('criado_por', user.id)
+          .order('created_at', { ascending: false });
+
+        if (formError) throw formError;
+
+        // Para cada formulário, contar quantas respostas tem
+        const formulariosComContagem = await Promise.all(
+          (formularios || []).map(async (form) => {
+            const { count, error: countError } = await supabase
+              .from('respostas_formulario')
+              .select('*', { count: 'exact', head: true })
+              .eq('formulario_id', form.id);
+
+            return {
+              ...form,
+              total_respostas: countError ? 0 : count || 0,
+            };
+          })
+        );
+
+        setFormulariosComRespostas(formulariosComContagem);
+      } catch (err) {
+        console.error('Erro ao buscar formulários:', err);
+        showMessage('error', 'Erro ao carregar formulários');
+      } finally {
+        setLoadingFormularios(false);
+      }
+    };
+
+    fetchFormulariosComRespostas();
+  }, [currentScreen, user?.id]);
 
   const showMessage = (type, text) => {
     setMessage({ type, text });
@@ -232,6 +285,155 @@ function DashboardContent() {
       console.error('Erro ao remover favorito:', error);
       showMessage('error', 'Erro ao remover favorito');
     }
+  };
+
+  const handleVisualizarResultados = async (formulario) => {
+    try {
+      setLoadingRespostas(true);
+      setFormularioSelecionado(formulario);
+
+      console.log('🔍 Carregando resultados do formulário:', formulario.id);
+
+      // Buscar perguntas do formulário
+      const { data: perguntas, error: perguntasError } = await supabase
+        .from('perguntas_formulario')
+        .select('*')
+        .eq('formulario_id', formulario.id)
+        .order('ordem', { ascending: true });
+
+      if (perguntasError) {
+        console.error('❌ Erro ao buscar perguntas:', perguntasError);
+        throw perguntasError;
+      }
+
+      console.log('✅ Perguntas encontradas:', perguntas?.length || 0);
+
+      // Parsear opções das perguntas
+      const perguntasParseadas = (perguntas || []).map(p => ({
+        ...p,
+        opcoes: p.opcoes ? JSON.parse(p.opcoes) : [],
+      }));
+
+      setPerguntasFormulario(perguntasParseadas);
+
+      // Buscar todas as respostas do formulário
+      const { data: respostas, error: respostasError } = await supabase
+        .from('respostas_formulario')
+        .select('*')
+        .eq('formulario_id', formulario.id);
+
+      if (respostasError) {
+        console.error('❌ Erro ao buscar respostas:', respostasError);
+        throw respostasError;
+      }
+
+      console.log('✅ Respostas brutas encontradas:', respostas);
+
+      // Processar respostas
+      const respostasProcessadas = (respostas || []).map(r => {
+        let respostasArray = [];
+        try {
+          respostasArray = typeof r.respostas === 'string' 
+            ? JSON.parse(r.respostas) 
+            : r.respostas;
+        } catch (parseError) {
+          console.error('❌ Erro ao parsear resposta:', parseError, r.respostas);
+        }
+
+        // Usar o user_id como nome temporário
+        const userId = r.respondido_por;
+        const userName = `Usuário ${userId.slice(0, 8)}...`;
+
+        return {
+          ...r,
+          respostas_array: respostasArray,
+          user_email: userName,
+          user_name: userName,
+        };
+      });
+
+      console.log('✅ Respostas processadas:', respostasProcessadas);
+      setRespostasFormulario(respostasProcessadas);
+    } catch (err) {
+      console.error('❌ Erro ao carregar resultados:', err);
+      showMessage('error', 'Erro ao carregar resultados do formulário: ' + err.message);
+    } finally {
+      setLoadingRespostas(false);
+    }
+  };
+
+  const handleFecharResultados = () => {
+    setFormularioSelecionado(null);
+    setRespostasFormulario([]);
+    setPerguntasFormulario([]);
+  };
+
+  // Função auxiliar para processar dados de gráfico de pizza
+  const processarDadosGraficoPizza = (pergunta) => {
+    console.log('🍕 Processando dados do gráfico para pergunta:', pergunta.id);
+    console.log('📊 Total de respostas disponíveis:', respostasFormulario.length);
+    
+    const contagemOpcoes = {};
+
+    // Inicializar todas as opções com 0
+    pergunta.opcoes.forEach(opcao => {
+      contagemOpcoes[opcao] = 0;
+    });
+
+    console.log('📋 Opções inicializadas:', contagemOpcoes);
+
+    // Contar respostas
+    respostasFormulario.forEach((resposta, idx) => {
+      console.log(`📝 Processando resposta ${idx + 1}:`, resposta.respostas_array);
+      
+      const respostaItem = resposta.respostas_array.find(
+        r => r.pergunta_id === pergunta.id
+      );
+
+      console.log(`  ➡️ Resposta para pergunta ${pergunta.id}:`, respostaItem);
+
+      if (respostaItem && respostaItem.resposta) {
+        if (Array.isArray(respostaItem.resposta)) {
+          // Checkbox - múltiplas seleções
+          console.log('  ✅ Array detectado (checkbox):', respostaItem.resposta);
+          respostaItem.resposta.forEach(opcao => {
+            if (contagemOpcoes.hasOwnProperty(opcao)) {
+              contagemOpcoes[opcao]++;
+              console.log(`    ➕ Incrementando "${opcao}": ${contagemOpcoes[opcao]}`);
+            }
+          });
+        } else {
+          // Múltipla escolha - única seleção
+          console.log('  ✅ String detectada (múltipla escolha):', respostaItem.resposta);
+          if (contagemOpcoes.hasOwnProperty(respostaItem.resposta)) {
+            contagemOpcoes[respostaItem.resposta]++;
+            console.log(`    ➕ Incrementando "${respostaItem.resposta}": ${contagemOpcoes[respostaItem.resposta]}`);
+          }
+        }
+      } else {
+        console.log('  ⚠️ Resposta vazia ou não encontrada para esta pergunta');
+      }
+    });
+
+    console.log('📊 Contagem final:', contagemOpcoes);
+
+    // Converter para formato do Recharts e adicionar cores
+    const cores = [
+      '#1570FF', '#E74C3C', '#2ECC71', '#F39C12', '#9B59B6',
+      '#3498DB', '#E67E22', '#1ABC9C', '#34495E', '#95A5A6'
+    ];
+
+    const resultado = Object.entries(contagemOpcoes)
+      .map(([nome, valor], index) => ({
+        name: nome,
+        value: valor,
+        fill: cores[index % cores.length],
+      }))
+      .filter(item => item.value > 0); // Mostrar apenas opções com votos
+
+    console.log('🎨 Dados formatados para o gráfico:', resultado);
+    
+    return resultado;
   };
   
   // Pegar iniciais para o avatar
@@ -690,6 +892,346 @@ function DashboardContent() {
     );
   };
 
+  const renderSearchScreen = () => {
+    return (
+      <div className="flex flex-col h-full p-6 space-y-6">
+        {/* Header */}
+        <div>
+          <h1 className={`text-2xl font-semibold ${
+            isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+          }`}>
+            Resultados dos Formulários
+          </h1>
+          <p className={`text-sm mt-1 ${
+            isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+          }`}>
+            Visualize e analise as respostas dos seus formulários
+          </p>
+        </div>
+
+        {/* Loading */}
+        {loadingFormularios ? (
+          <div className="flex items-center justify-center h-64">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-12 h-12 border-4 border-[#1570FF] border-t-transparent rounded-full animate-spin"></div>
+              <div className={isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'}>
+                Carregando formulários...
+              </div>
+            </div>
+          </div>
+        ) : formulariosComRespostas.length === 0 ? (
+          <div className={`text-center py-16 ${
+            isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+          }`}>
+            <Search className="w-16 h-16 mx-auto mb-4 opacity-50" />
+            <p className="text-lg font-medium mb-2">Nenhum formulário encontrado</p>
+            <p className="text-sm">
+              Crie formulários na Retaguarda para visualizar os resultados aqui
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {formulariosComRespostas.map((form) => (
+              <div
+                key={form.id}
+                className={`rounded-lg border shadow-sm p-6 transition-all hover:shadow-md cursor-pointer ${
+                  isDarkMode
+                    ? 'bg-[#2A2E45] border-[#3A3E55] hover:border-[#1570FF]'
+                    : 'bg-white border-[#E4E9F2] hover:border-[#1570FF]'
+                }`}
+                onClick={() => handleVisualizarResultados(form)}
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <h3 className={`font-semibold text-lg mb-1 ${
+                      isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                    }`}>
+                      {form.titulo}
+                    </h3>
+                    {form.descricao && (
+                      <p className={`text-sm line-clamp-2 ${
+                        isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+                      }`}>
+                        {form.descricao}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className={`flex items-center justify-between pt-4 border-t ${
+                  isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className={`w-4 h-4 ${
+                      isDarkMode ? 'text-[#4A90E2]' : 'text-[#1570FF]'
+                    }`} />
+                    <span className={`text-sm font-medium ${
+                      isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
+                    }`}>
+                      {form.total_respostas} {form.total_respostas === 1 ? 'resposta' : 'respostas'}
+                    </span>
+                  </div>
+                  <button
+                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                      isDarkMode
+                        ? 'bg-[#1570FF]/20 text-[#4A90E2] hover:bg-[#1570FF]/30'
+                        : 'bg-[#EDF3FF] text-[#1570FF] hover:bg-[#DDE7FF]'
+                    }`}
+                  >
+                    Ver Resultados
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Modal de Resultados */}
+        {formularioSelecionado && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) handleFecharResultados();
+            }}
+          >
+            <div
+              className={`w-full max-w-6xl max-h-[90vh] overflow-auto rounded-lg shadow-2xl ${
+                isDarkMode ? 'bg-[#1A1D21]' : 'bg-white'
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header do Modal */}
+              <div className={`sticky top-0 z-10 flex items-center justify-between p-6 border-b ${
+                isDarkMode 
+                  ? 'bg-[#1A1D21] border-[#3A3E55]' 
+                  : 'bg-white border-[#E4E9F2]'
+              }`}>
+                <div>
+                  <h2 className={`text-2xl font-semibold ${
+                    isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                  }`}>
+                    {formularioSelecionado.titulo}
+                  </h2>
+                  <p className={`text-sm mt-1 ${
+                    isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
+                  }`}>
+                    {respostasFormulario.length} {respostasFormulario.length === 1 ? 'resposta recebida' : 'respostas recebidas'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleFecharResultados}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isDarkMode
+                      ? 'hover:bg-[#2A2E45] text-[#B0B5C9]'
+                      : 'hover:bg-[#EDF3FF] text-[#6F7689]'
+                  }`}
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              {/* Conteúdo do Modal */}
+              <div className="p-6 space-y-8">
+                {loadingRespostas ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="w-12 h-12 border-4 border-[#1570FF] border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                ) : respostasFormulario.length === 0 ? (
+                  <div className={`text-center py-12 ${
+                    isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                  }`}>
+                    <p className="text-lg font-medium mb-2">Nenhuma resposta ainda</p>
+                    <p className="text-sm">Este formulário ainda não recebeu respostas</p>
+                  </div>
+                ) : (
+                  perguntasFormulario.map((pergunta, index) => (
+                    <div
+                      key={pergunta.id}
+                      className={`rounded-lg border p-6 ${
+                        isDarkMode
+                          ? 'bg-[#2A2E45] border-[#3A3E55]'
+                          : 'bg-white border-[#E4E9F2]'
+                      }`}
+                    >
+                      <h3 className={`text-lg font-semibold mb-4 ${
+                        isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                      }`}>
+                        {index + 1}. {pergunta.texto}
+                      </h3>
+
+                      {/* Renderizar baseado no tipo de pergunta */}
+                      {(pergunta.tipo === 'multipla_escolha' || pergunta.tipo === 'checkbox') ? (
+                        <div className="space-y-4">
+                          {(() => {
+                            const dadosGrafico = processarDadosGraficoPizza(pergunta);
+                            const totalRespostas = dadosGrafico.reduce((sum, item) => sum + item.value, 0);
+
+                            return dadosGrafico.length > 0 ? (
+                              <>
+                                {/* Gráfico de Pizza */}
+                                <div className="flex items-center justify-center">
+                                  <ResponsiveContainer width="100%" height={300}>
+                                    <PieChart>
+                                      <Pie
+                                        data={dadosGrafico}
+                                        cx="50%"
+                                        cy="50%"
+                                        labelLine={false}
+                                        label={({ name, value, percent }) => 
+                                          `${name}: ${value} (${(percent * 100).toFixed(1)}%)`
+                                        }
+                                        outerRadius={100}
+                                        dataKey="value"
+                                      >
+                                        {dadosGrafico.map((entry, index) => (
+                                          <Cell key={`cell-${index}`} fill={entry.fill} />
+                                        ))}
+                                      </Pie>
+                                      <Tooltip 
+                                        formatter={(value) => [value, 'Respostas']}
+                                        contentStyle={{
+                                          backgroundColor: isDarkMode ? '#2A2E45' : '#fff',
+                                          border: `1px solid ${isDarkMode ? '#3A3E55' : '#E4E9F2'}`,
+                                          borderRadius: '8px',
+                                          padding: '8px 12px'
+                                        }}
+                                      />
+                                    </PieChart>
+                                  </ResponsiveContainer>
+                                </div>
+
+                                {/* Legenda com estatísticas */}
+                                <div className="grid grid-cols-2 gap-3">
+                                  {dadosGrafico.map((item, index) => (
+                                    <div
+                                      key={index}
+                                      className={`flex items-center gap-3 p-3 rounded-lg ${
+                                        isDarkMode ? 'bg-[#1A1D21]' : 'bg-[#F7F9FC]'
+                                      }`}
+                                    >
+                                      <div
+                                        className="w-4 h-4 rounded-full flex-shrink-0"
+                                        style={{ backgroundColor: item.fill }}
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <div className={`text-sm font-medium truncate ${
+                                          isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                                        }`}>
+                                          {item.name}
+                                        </div>
+                                        <div className={`text-xs ${
+                                          isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                                        }`}>
+                                          {item.value} {item.value === 1 ? 'voto' : 'votos'} 
+                                          {' '}({((item.value / totalRespostas) * 100).toFixed(1)}%)
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {/* Total */}
+                                <div className={`text-center pt-4 border-t ${
+                                  isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'
+                                }`}>
+                                  <span className={`text-sm font-medium ${
+                                    isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
+                                  }`}>
+                                    Total de respostas: {totalRespostas}
+                                  </span>
+                                </div>
+                              </>
+                            ) : (
+                              <div className={`text-center py-8 ${
+                                isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                              }`}>
+                                <p>Nenhuma resposta para esta pergunta ainda</p>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full">
+                            <thead>
+                              <tr className={`border-b ${
+                                isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'
+                              }`}>
+                                <th className={`text-left py-3 px-4 font-medium ${
+                                  isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
+                                }`}>
+                                  Usuário
+                                </th>
+                                <th className={`text-left py-3 px-4 font-medium ${
+                                  isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
+                                }`}>
+                                  Resposta
+                                </th>
+                                <th className={`text-left py-3 px-4 font-medium ${
+                                  isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
+                                }`}>
+                                  Data
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {respostasFormulario.map((resposta) => {
+                                const respostaItem = resposta.respostas_array.find(
+                                  r => r.pergunta_id === pergunta.id
+                                );
+                                
+                                if (!respostaItem || !respostaItem.resposta) return null;
+
+                                return (
+                                  <tr
+                                    key={resposta.id}
+                                    className={`border-b ${
+                                      isDarkMode
+                                        ? 'border-[#3A3E55] hover:bg-[#1A1D21]'
+                                        : 'border-[#E4E9F2] hover:bg-[#F7F9FC]'
+                                    }`}
+                                  >
+                                    <td className={`py-3 px-4 ${
+                                      isDarkMode ? 'text-white' : 'text-[#2A2E45]'
+                                    }`}>
+                                      {resposta.user_name}
+                                    </td>
+                                    <td className={`py-3 px-4 ${
+                                      isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
+                                    }`}>
+                                      {Array.isArray(respostaItem.resposta) 
+                                        ? respostaItem.resposta.join(', ')
+                                        : respostaItem.resposta}
+                                    </td>
+                                    <td className={`py-3 px-4 text-sm ${
+                                      isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
+                                    }`}>
+                                      {new Date(resposta.created_at).toLocaleDateString('pt-BR', {
+                                        day: '2-digit',
+                                        month: '2-digit',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderSettingsScreen = () => {
     return (
       <div className="flex flex-col h-full p-6 space-y-6 overflow-auto">
@@ -929,10 +1471,7 @@ function DashboardContent() {
           "Aqui você pode adicionar seu componente de mapa e funcionalidades relacionadas.",
         );
       case "search":
-        return renderEmptyScreen(
-          "Tela de Pesquisa",
-          "Configure aqui suas funcionalidades de busca e filtros.",
-        );
+        return renderSearchScreen();
       case "settings":
         return renderSettingsScreen();
       default:
@@ -1044,7 +1583,7 @@ function DashboardContent() {
           <div className={`text-[11px] text-center ${
             isDarkMode ? 'text-[#8A8FA6]' : 'text-[#8A8FA6]'
           }`}>
-            © NovaIris
+            © 2024 Minha Dashboard
           </div>
         </div>
       </div>
@@ -1061,7 +1600,7 @@ function DashboardContent() {
           <div className={`font-bold text-base mr-8 ${
             isDarkMode ? 'text-white' : 'text-[#2A2E45]'
           }`}>
-            OpinaAI
+            Dashboard
           </div>
 
           {/* Current Screen Title */}
