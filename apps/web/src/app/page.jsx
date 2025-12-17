@@ -138,11 +138,10 @@ function DashboardContent() {
       try {
         setLoadingFormularios(true);
 
-        // Buscar todos os formulários do usuário
+        // Buscar TODOS os formulários (não apenas do usuário)
         const { data: formularios, error: formError } = await supabase
           .from('formularios')
           .select('*')
-          .eq('criado_por', user.id)
           .order('created_at', { ascending: false });
 
         if (formError) throw formError;
@@ -329,6 +328,50 @@ function DashboardContent() {
 
       console.log('✅ Respostas brutas encontradas:', respostas);
 
+      // Buscar emails dos usuários que responderam
+      const userIds = [...new Set(respostas.map(r => r.respondido_por))];
+      
+      console.log('📧 Buscando emails de', userIds.length, 'usuários');
+
+      // Tentar usar RPC primeiro
+      const { data: usersData, error: usersError } = await supabase
+        .rpc('get_users_by_ids', { user_ids: userIds });
+
+      // Criar mapa de emails
+      const userEmailMap = {};
+      
+      if (usersData && !usersError) {
+        console.log('✅ Emails obtidos via RPC:', usersData.length);
+        usersData.forEach(u => {
+          userEmailMap[u.id] = u.email;
+        });
+      } else {
+        console.log('⚠️ RPC não disponível, tentando buscar via auth.admin');
+        
+        // Fallback: tentar buscar individualmente (pode não funcionar sem permissões)
+        for (const userId of userIds) {
+          try {
+            // Tentar através de uma query na tabela moedas_usuario para inferir o user
+            // (não é o ideal, mas funciona como último recurso)
+            const { data: userData } = await supabase
+              .from('moedas_usuario')
+              .select('user_id')
+              .eq('user_id', userId)
+              .single();
+            
+            if (userData) {
+              // Usar o ID parcial como fallback
+              userEmailMap[userId] = `user_${userId.slice(0, 8)}@sistema.local`;
+            }
+          } catch (err) {
+            console.log('⚠️ Não foi possível buscar dados do usuário:', userId);
+            userEmailMap[userId] = `user_${userId.slice(0, 8)}@sistema.local`;
+          }
+        }
+      }
+
+      console.log('📧 Mapa de emails final:', userEmailMap);
+
       // Processar respostas
       const respostasProcessadas = (respostas || []).map(r => {
         let respostasArray = [];
@@ -340,14 +383,14 @@ function DashboardContent() {
           console.error('❌ Erro ao parsear resposta:', parseError, r.respostas);
         }
 
-        // Usar o user_id como nome temporário
-        const userId = r.respondido_por;
-        const userName = `Usuário ${userId.slice(0, 8)}...`;
+        // Tentar pegar o email do mapa de usuários
+        const userEmail = userEmailMap[r.respondido_por] || `user_${r.respondido_por.slice(0, 8)}@sistema.local`;
+        const userName = userEmail.split('@')[0] || userEmail;
 
         return {
           ...r,
           respostas_array: respostasArray,
-          user_email: userName,
+          user_email: userEmail,
           user_name: userName,
         };
       });

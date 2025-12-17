@@ -118,10 +118,10 @@ function RetaguardaDashboardContent() {
 
       try {
         setLoadingForms(true);
+        // Buscar TODOS os formulários (não apenas do usuário)
         const { data, error } = await supabase
           .from('formularios')
           .select('*')
-          .eq('criado_por', user.id)
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -144,10 +144,10 @@ function RetaguardaDashboardContent() {
 
       try {
         setLoadingFormsParaResponder(true);
+        // Buscar TODOS os formulários ativos (não apenas do usuário)
         const { data, error } = await supabase
           .from('formularios')
           .select('*')
-          .eq('criado_por', user.id)
           .eq('ativo', true)
           .order('created_at', { ascending: false });
 
