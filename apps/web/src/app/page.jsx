@@ -333,38 +333,54 @@ function DashboardContent() {
       
       console.log('📧 Buscando emails de', userIds.length, 'usuários');
 
-      // Tentar usar RPC primeiro
-      const { data: usersData, error: usersError } = await supabase
+      // MÉTODO 1: Tentar usar RPC primeiro
+      let { data: usersData, error: usersError } = await supabase
         .rpc('get_users_by_ids', { user_ids: userIds });
+
+      // MÉTODO 2: Se RPC falhar, tentar usar VIEW
+      if (!usersData || usersError) {
+        console.log('⚠️ RPC não funcionou, tentando VIEW usuarios_publicos');
+        
+        const { data: viewData, error: viewError } = await supabase
+          .from('usuarios_publicos')
+          .select('id, email, display_name')
+          .in('id', userIds);
+        
+        if (viewData && !viewError) {
+          console.log('✅ Emails obtidos via VIEW:', viewData.length);
+          usersData = viewData;
+          usersError = null;
+        }
+      }
 
       // Criar mapa de emails
       const userEmailMap = {};
       
-      if (usersData && !usersError) {
-        console.log('✅ Emails obtidos via RPC:', usersData.length);
+      if (usersData && !usersError && usersData.length > 0) {
+        console.log('✅ Emails obtidos com sucesso:', usersData.length);
         usersData.forEach(u => {
-          userEmailMap[u.id] = u.email;
+          userEmailMap[u.id] = u.email || u.display_name || `user_${u.id.slice(0, 8)}`;
         });
       } else {
-        console.log('⚠️ RPC não disponível, tentando buscar via auth.admin');
+        console.log('❌ Não foi possível buscar emails. Usando fallback.');
         
-        // Fallback: tentar buscar individualmente (pode não funcionar sem permissões)
+        // MÉTODO 3: Fallback - buscar via query direta (última tentativa)
         for (const userId of userIds) {
           try {
-            // Tentar através de uma query na tabela moedas_usuario para inferir o user
-            // (não é o ideal, mas funciona como último recurso)
-            const { data: userData } = await supabase
-              .from('moedas_usuario')
-              .select('user_id')
-              .eq('user_id', userId)
+            // Tentar buscar email através da VIEW
+            const { data: singleUser } = await supabase
+              .from('usuarios_publicos')
+              .select('email')
+              .eq('id', userId)
               .single();
             
-            if (userData) {
-              // Usar o ID parcial como fallback
+            if (singleUser?.email) {
+              userEmailMap[userId] = singleUser.email;
+            } else {
               userEmailMap[userId] = `user_${userId.slice(0, 8)}@sistema.local`;
             }
           } catch (err) {
-            console.log('⚠️ Não foi possível buscar dados do usuário:', userId);
+            console.log('⚠️ Não foi possível buscar email do usuário:', userId);
             userEmailMap[userId] = `user_${userId.slice(0, 8)}@sistema.local`;
           }
         }
@@ -383,9 +399,17 @@ function DashboardContent() {
           console.error('❌ Erro ao parsear resposta:', parseError, r.respostas);
         }
 
-        // Tentar pegar o email do mapa de usuários
+        // Pegar o email do mapa de usuários
         const userEmail = userEmailMap[r.respondido_por] || `user_${r.respondido_por.slice(0, 8)}@sistema.local`;
-        const userName = userEmail.split('@')[0] || userEmail;
+        
+        // Se o email for válido (contém @), usar só a parte antes do @
+        // Senão, usar o email completo como nome
+        let userName;
+        if (userEmail.includes('@')) {
+          userName = userEmail; // Mostrar email completo
+        } else {
+          userName = userEmail;
+        }
 
         return {
           ...r,
