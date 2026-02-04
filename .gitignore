@@ -1,0 +1,51 @@
+﻿# Dependencies
+node_modules/
+/node_modules
+apps/web/node_modules/
+
+# Testing
+/coverage
+
+# Next.js
+/.next/
+/out/
+/build
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env files
+.env*.local
+.env
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# ===================================
+# DADOS ELEITORAIS TSE (ARQUIVOS GRANDES)
+# ===================================
+
+# Todos os CSVs da pasta data
+apps/web/public/data/*.csv
+
+# Todos os CSVs dos municípios de SP
+apps/web/public/data/municipios_sp/*.csv
+
+# Manter APENAS o index.json de SP
+!apps/web/public/data/municipios_sp/index.json
+
+# Scripts Python
+apps/web/public/data/*.py
+
+# Certificados
+apps/web/public/data/*.p12
