@@ -556,7 +556,11 @@ function DashboardContent() {
       label: isDarkMode ? "Modo Claro" : "Modo Escuro",
       onClick: toggleDarkMode 
     },
-    { icon: BookOpen, label: "Aprender" },
+    { 
+      icon: BookOpen, 
+      label: "Aprender",
+      onClick: () => navigate('/aprender')
+    },
     { icon: HelpCircle, label: "Centro de Ajuda" },
     { 
       icon: Wrench, 
