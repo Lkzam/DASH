@@ -1,6 +1,8 @@
+
 import { useState } from 'react';
 import { useDarkMode } from '../../contexts/DarkModeContext';
 import { useNavigate } from 'react-router-dom';
+import FloatingLines from '../../components/FloatingLines';
 import {
   BookOpen,
   Home,
@@ -9,8 +11,6 @@ import {
   Search,
   Settings,
   FileText,
-  Eye,
-  Users,
   ChevronRight,
   Database,
   ArrowLeft,
@@ -571,10 +571,36 @@ export default function AprenderPage() {
   };
 
   return (
-    <div className={`min-h-screen ${
+    <div className={`min-h-screen relative overflow-hidden ${
       isDarkMode ? 'bg-[#212529]' : 'bg-[#FAFBFD]'
     }`}>
-      <div className="max-w-7xl mx-auto p-6">
+      {/* Background Animado */}
+      <div className="fixed inset-0 z-0 opacity-30">
+        <FloatingLines
+          linesGradient={
+            isDarkMode
+              ? ['#1570FF', '#4A90E2', '#6BA3E8']
+              : ['#1570FF', '#3B82F6', '#60A5FA']
+          }
+          enabledWaves={['bottom', 'middle', 'top']}
+          lineCount={[5, 4, 5]}
+          lineDistance={[41.5, 45, 38]}
+          topWavePosition={{ x: 10.0, y: 0.5, rotate: -0.4 }}
+          middleWavePosition={{ x: 5.0, y: 0.0, rotate: 0.2 }}
+          bottomWavePosition={{ x: 2.0, y: -0.7, rotate: 0.4 }}
+          animationSpeed={0.8}
+          interactive={true}
+          bendRadius={5.0}
+          bendStrength={-0.5}
+          mouseDamping={0.08}
+          parallax={true}
+          parallaxStrength={0.15}
+          mixBlendMode="screen"
+        />
+      </div>
+
+      {/* Conteúdo */}
+      <div className="relative z-10 max-w-7xl mx-auto p-6">
         {moduloSelecionado ? renderConteudoModulo() : renderListaModulos()}
       </div>
     </div>
