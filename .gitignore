@@ -1,51 +1,137 @@
-﻿# Dependencies
+# ============================================================
+# NODE / NPM / BUN
+# ============================================================
 node_modules/
-/node_modules
-apps/web/node_modules/
+.npm
+.yarn/cache
+.yarn/unplugged
+.yarn/install-state.gz
+bun.lockb
+package-lock.json
+yarn.lock
 
-# Testing
-/coverage
+# ============================================================
+# VARIÁVEIS DE AMBIENTE — NUNCA COMMITAR
+# ============================================================
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.staging
+# Manter somente o exemplo
+!.env.example
 
-# Next.js
-/.next/
-/out/
-/build
+# ============================================================
+# BUILD / DIST — React Router v7 + Vite
+# ============================================================
+apps/web/build/
+apps/web/dist/
+apps/web/.react-router/
+apps/web/.vite/
+apps/web/.cache/
 
-# Misc
-.DS_Store
-*.pem
+# ============================================================
+# EXPO / REACT NATIVE (mobile)
+# ============================================================
+apps/mobile/.expo/
+apps/mobile/dist/
+apps/mobile/web-build/
+apps/mobile/android/
+apps/mobile/ios/
+apps/mobile/node_modules/
+# Expo eas
+apps/mobile/eas.json.local
 
-# Debug
+# ============================================================
+# NEXT.JS (vestígios de config antiga)
+# ============================================================
+.next/
+out/
+
+# ============================================================
+# TESTES / COBERTURA
+# ============================================================
+coverage/
+.nyc_output/
+*.lcov
+
+# ============================================================
+# TYPESCRIPT
+# ============================================================
+*.tsbuildinfo
+apps/web/react-router-env.d.ts
+
+# ============================================================
+# LOGS
+# ============================================================
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+*.log
+logs/
 
-# Env files
-.env*.local
-.env
+# ============================================================
+# SISTEMA OPERACIONAL
+# ============================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
 
-# Vercel
-.vercel
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-# TypeScript
-*.tsbuildinfo
-next-env.d.ts
+# Linux
+*~
 
-# ===================================
-# DADOS ELEITORAIS TSE (ARQUIVOS GRANDES)
-# ===================================
+# ============================================================
+# EDITORES / IDEs
+# ============================================================
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.history/
 
-# Todos os CSVs da pasta data
+# ============================================================
+# CERTIFICADOS / CHAVES
+# ============================================================
+*.pem
+*.p12
+*.key
+*.crt
+*.pfx
+
+# ============================================================
+# DADOS ELEITORAIS TSE (arquivos grandes)
+# ============================================================
 apps/web/public/data/*.csv
-
-# Todos os CSVs dos municípios de SP
 apps/web/public/data/municipios_sp/*.csv
-
-# Manter APENAS o index.json de SP
 !apps/web/public/data/municipios_sp/index.json
-
-# Scripts Python
 apps/web/public/data/*.py
-
-# Certificados
 apps/web/public/data/*.p12
+
+# ============================================================
+# MISC
+# ============================================================
+.vercel
+.netlify
+.turbo
+*.tgz
+*.zip

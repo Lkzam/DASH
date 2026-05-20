@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, User, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -32,7 +32,7 @@ export default function LoginPage() {
         }
 
         if (data) {
-          navigate('/');
+          navigate('/dashboard');
         }
       } else {
         // REGISTRO
@@ -66,9 +66,18 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#1570FF] to-[#0D4FB8] flex items-center justify-center p-4">
       <div className="w-full max-w-md">
+        {/* Voltar */}
+        <button
+          onClick={() => navigate('/')}
+          className="flex items-center gap-2 text-blue-100 hover:text-white transition-colors mb-6 text-sm"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Voltar ao início
+        </button>
+
         {/* Logo/Título */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">OpinaAI</h1>
+          <h1 className="text-4xl font-bold text-white mb-2">OpinAI</h1>
           <p className="text-blue-100">
             {isLogin ? 'Faça login para continuar' : 'Crie sua conta'}
           </p>
@@ -239,9 +248,20 @@ export default function LoginPage() {
           </div>
         </div>
 
+        {/* Link para assinar */}
+        <div className="text-center mt-4 bg-white/10 rounded-xl p-4 border border-white/20">
+          <p className="text-blue-100 text-sm mb-2">Ainda não tem um plano ativo?</p>
+          <button
+            onClick={() => navigate('/planos')}
+            className="text-white font-semibold text-sm hover:underline"
+          >
+            Assinar o OpinAI →
+          </button>
+        </div>
+
         {/* Footer */}
         <div className="text-center mt-6 text-blue-100 text-sm">
-          © NovaIris - Todos os direitos reservados
+          © 2025 OpinAI - Todos os direitos reservados
         </div>
       </div>
     </div>

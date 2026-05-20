@@ -119,7 +119,7 @@ export default function ProtectedRetaguardaRoute({ children }) {
             {/* Botões */}
             <div className="space-y-3">
               <button
-                onClick={() => navigate('/')}
+                onClick={() => navigate('/dashboard')}
                 className="w-full bg-[#1570FF] hover:bg-[#0D4FB8] text-white font-medium py-3 px-4 rounded-lg transition-colors"
               >
                 Voltar ao Dashboard
@@ -127,7 +127,7 @@ export default function ProtectedRetaguardaRoute({ children }) {
               
               <button
                 onClick={() => {
-                  navigate('/');
+                  navigate('/dashboard');
                   setTimeout(() => {
                     alert('Para solicitar acesso à Retaguarda, entre em contato com um administrador através do sistema de suporte.');
                   }, 500);

@@ -17,7 +17,16 @@ type Pages = {
   "/aprender": {
     params: {};
   };
+  "/dashboard": {
+    params: {};
+  };
   "/login": {
+    params: {};
+  };
+  "/pagamento/sucesso": {
+    params: {};
+  };
+  "/planos": {
     params: {};
   };
   "/retaguarda": {
@@ -33,7 +42,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/aprender" | "/login" | "/retaguarda" | "/*";
+    page: "/" | "/aprender" | "/dashboard" | "/login" | "/pagamento/sucesso" | "/planos" | "/retaguarda" | "/*";
   };
   "./page.jsx": {
     id: "page";
@@ -43,9 +52,21 @@ type RouteFiles = {
     id: "aprender/page";
     page: "/aprender";
   };
+  "./dashboard/page.jsx": {
+    id: "dashboard/page";
+    page: "/dashboard";
+  };
   "./login/page.jsx": {
     id: "login/page";
     page: "/login";
+  };
+  "./pagamento/sucesso/page.jsx": {
+    id: "pagamento/sucesso/page";
+    page: "/pagamento/sucesso";
+  };
+  "./planos/page.jsx": {
+    id: "planos/page";
+    page: "/planos";
   };
   "./retaguarda/page.jsx": {
     id: "retaguarda/page";
@@ -61,7 +82,10 @@ type RouteModules = {
   "root": typeof import("./src/app/root.tsx");
   "page": typeof import("./src/app/./page.jsx");
   "aprender/page": typeof import("./src/app/./aprender/page.jsx");
+  "dashboard/page": typeof import("./src/app/./dashboard/page.jsx");
   "login/page": typeof import("./src/app/./login/page.jsx");
+  "pagamento/sucesso/page": typeof import("./src/app/./pagamento/sucesso/page.jsx");
+  "planos/page": typeof import("./src/app/./planos/page.jsx");
   "retaguarda/page": typeof import("./src/app/./retaguarda/page.jsx");
   "__create/not-found": typeof import("./src/app/./__create/not-found.tsx");
 };
