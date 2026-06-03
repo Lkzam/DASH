@@ -8,7 +8,6 @@ import {
   Bell,
   Moon,
   Sun,
-  Globe,
   HelpCircle,
   BookOpen,
   Wrench,
@@ -23,6 +22,7 @@ import AnaliseEleitoral from "../../components/AnaliseEleitoral";
 import { useDarkMode } from "../../contexts/DarkModeContext";
 import { useAuth } from "../../contexts/AuthContext";
 import ProtectedRoute from "../../components/ProtectedRoute";
+import SupportChat from "../../components/SupportChat";
 import { supabase } from "../../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
 
@@ -32,7 +32,7 @@ function DashboardContent() {
   const { isDarkMode, toggleDarkMode } = useDarkMode();
   const { user, signOut } = useAuth();
 
-  // Estados para a tela de configuraÃ§Ãµes
+  // Estados para a tela de configurações
   const [formData, setFormData] = useState({
     displayName: '',
     email: '',
@@ -50,7 +50,10 @@ function DashboardContent() {
   const [loadingFavoritos, setLoadingFavoritos] = useState(true);
   const [showAddFavorito, setShowAddFavorito] = useState(false);
 
-  // Estados para visualizaÃ§Ã£o de resultados de formulÃ¡rios
+  // Estado do chat de suporte
+  const [supportChatOpen, setSupportChatOpen] = useState(false);
+
+  // Estados para visualização de resultados de formulários
   const [formulariosComRespostas, setFormulariosComRespostas] = useState([]);
   const [loadingFormularios, setLoadingFormularios] = useState(false);
   const [formularioSelecionado, setFormularioSelecionado] = useState(null);
@@ -58,11 +61,11 @@ function DashboardContent() {
   const [perguntasFormulario, setPerguntasFormulario] = useState([]);
   const [loadingRespostas, setLoadingRespostas] = useState(false);
 
-  // Extrair dados do usuÃ¡rio
+  // Extrair dados do usuário
   const userEmail = user?.email || 'usuario@email.com';
-  const displayName = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'UsuÃ¡rio';
+  const displayName = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Usuário';
 
-  // Atualizar formData quando o usuÃ¡rio mudar
+  // Atualizar formData quando o usuário mudar
   useEffect(() => {
     setFormData({
       displayName: displayName,
@@ -71,7 +74,7 @@ function DashboardContent() {
     });
   }, [user, displayName, userEmail]);
 
-  // Buscar saldo de moedas do usuÃ¡rio
+  // Buscar saldo de moedas do usuário
   useEffect(() => {
     const fetchSaldoMoedas = async () => {
       if (!user?.id) return;
@@ -101,7 +104,7 @@ function DashboardContent() {
     fetchSaldoMoedas();
   }, [user?.id]);
 
-  // Buscar favoritos do usuÃ¡rio
+  // Buscar favoritos do usuário
   useEffect(() => {
     const fetchFavoritos = async () => {
       if (!user?.id) return;
@@ -131,7 +134,7 @@ function DashboardContent() {
     fetchFavoritos();
   }, [user?.id]);
 
-  // Buscar formulÃ¡rios com respostas para a tela de pesquisa
+  // Buscar formulários com respostas para a tela de pesquisa
   useEffect(() => {
     const fetchFormulariosComRespostas = async () => {
       if (currentScreen !== 'search' || !user?.id) return;
@@ -139,7 +142,7 @@ function DashboardContent() {
       try {
         setLoadingFormularios(true);
 
-        // Buscar TODOS os formulÃ¡rios (nÃ£o apenas do usuÃ¡rio)
+        // Buscar TODOS os formulários (não apenas do usuário)
         const { data: formularios, error: formError } = await supabase
           .from('formularios')
           .select('*')
@@ -147,7 +150,7 @@ function DashboardContent() {
 
         if (formError) throw formError;
 
-        // Para cada formulÃ¡rio, contar quantas respostas tem
+        // Para cada formulário, contar quantas respostas tem
         const formulariosComContagem = await Promise.all(
           (formularios || []).map(async (form) => {
             const { count, error: countError } = await supabase
@@ -164,8 +167,8 @@ function DashboardContent() {
 
         setFormulariosComRespostas(formulariosComContagem);
       } catch (err) {
-        console.error('Erro ao buscar formulÃ¡rios:', err);
-        showMessage('error', 'Erro ao carregar formulÃ¡rios');
+        console.error('Erro ao buscar formulários:', err);
+        showMessage('error', 'Erro ao carregar formulários');
       } finally {
         setLoadingFormularios(false);
       }
@@ -236,10 +239,10 @@ function DashboardContent() {
       const navItem = navItems.find(item => item.id === screenId);
       if (!navItem) return;
 
-      // Verifica se jÃ¡ existe
+      // Verifica se já existe
       const jaExiste = favoritos.some(fav => fav.screen_id === screenId);
       if (jaExiste) {
-        showMessage('error', 'Este item jÃ¡ estÃ¡ nos favoritos!');
+        showMessage('error', 'Este item já está nos favoritos!');
         return;
       }
 
@@ -292,9 +295,9 @@ function DashboardContent() {
       setLoadingRespostas(true);
       setFormularioSelecionado(formulario);
 
-      console.log('ðŸ” Carregando resultados do formulÃ¡rio:', formulario.id);
+      console.log('[INFO] Carregando resultados do formulário:', formulario.id);
 
-      // Buscar perguntas do formulÃ¡rio
+      // Buscar perguntas do formulário
       const { data: perguntas, error: perguntasError } = await supabase
         .from('perguntas_formulario')
         .select('*')
@@ -302,13 +305,13 @@ function DashboardContent() {
         .order('ordem', { ascending: true });
 
       if (perguntasError) {
-        console.error('âŒ Erro ao buscar perguntas:', perguntasError);
+        console.error('[ERRO] Erro ao buscar perguntas:', perguntasError);
         throw perguntasError;
       }
 
-      console.log('âœ… Perguntas encontradas:', perguntas?.length || 0);
+      console.log('✅ Perguntas encontradas:', perguntas?.length || 0);
 
-      // Parsear opÃ§Ãµes das perguntas
+      // Parsear opções das perguntas
       const perguntasParseadas = (perguntas || []).map(p => ({
         ...p,
         opcoes: p.opcoes ? JSON.parse(p.opcoes) : [],
@@ -316,31 +319,31 @@ function DashboardContent() {
 
       setPerguntasFormulario(perguntasParseadas);
 
-      // Buscar todas as respostas do formulÃ¡rio
+      // Buscar todas as respostas do formulário
       const { data: respostas, error: respostasError } = await supabase
         .from('respostas_formulario')
         .select('*')
         .eq('formulario_id', formulario.id);
 
       if (respostasError) {
-        console.error('âŒ Erro ao buscar respostas:', respostasError);
+        console.error('[ERRO] Erro ao buscar respostas:', respostasError);
         throw respostasError;
       }
 
-      console.log('âœ… Respostas brutas encontradas:', respostas);
+      console.log('✅ Respostas brutas encontradas:', respostas);
 
-      // Buscar emails dos usuÃ¡rios que responderam
+      // Buscar emails dos usuários que responderam
       const userIds = [...new Set(respostas.map(r => r.respondido_por))];
       
-      console.log('ðŸ“§ Buscando emails de', userIds.length, 'usuÃ¡rios');
+      console.log('📧 Buscando emails de', userIds.length, 'usuários');
 
-      // MÃ‰TODO 1: Tentar usar RPC primeiro
+      // MÉTODO 1: Tentar usar RPC primeiro
       let { data: usersData, error: usersError } = await supabase
         .rpc('get_users_by_ids', { user_ids: userIds });
 
-      // MÃ‰TODO 2: Se RPC falhar, tentar usar VIEW
+      // MÉTODO 2: Se RPC falhar, tentar usar VIEW
       if (!usersData || usersError) {
-        console.log('âš ï¸ RPC nÃ£o funcionou, tentando VIEW usuarios_publicos');
+        console.log('⚠️ RPC nao funcionou, tentando VIEW usuarios_publicos');
         
         const { data: viewData, error: viewError } = await supabase
           .from('usuarios_publicos')
@@ -348,7 +351,7 @@ function DashboardContent() {
           .in('id', userIds);
         
         if (viewData && !viewError) {
-          console.log('âœ… Emails obtidos via VIEW:', viewData.length);
+          console.log('✅ Emails obtidos via VIEW:', viewData.length);
           usersData = viewData;
           usersError = null;
         }
@@ -358,17 +361,17 @@ function DashboardContent() {
       const userEmailMap = {};
       
       if (usersData && !usersError && usersData.length > 0) {
-        console.log('âœ… Emails obtidos com sucesso:', usersData.length);
+        console.log('✅ Emails obtidos com sucesso:', usersData.length);
         usersData.forEach(u => {
           userEmailMap[u.id] = u.email || u.display_name || `user_${u.id.slice(0, 8)}`;
         });
       } else {
-        console.log('âŒ NÃ£o foi possÃ­vel buscar emails. Usando fallback.');
+        console.log('[ERRO] Não foi possível buscar emails. Usando fallback.');
         
-        // MÃ‰TODO 3: Fallback - buscar via query direta (Ãºltima tentativa)
+        // MÉTODO 3: Fallback - buscar via query direta (última tentativa)
         for (const userId of userIds) {
           try {
-            // Tentar buscar email atravÃ©s da VIEW
+            // Tentar buscar email através da VIEW
             const { data: singleUser } = await supabase
               .from('usuarios_publicos')
               .select('email')
@@ -381,13 +384,13 @@ function DashboardContent() {
               userEmailMap[userId] = `user_${userId.slice(0, 8)}@sistema.local`;
             }
           } catch (err) {
-            console.log('âš ï¸ NÃ£o foi possÃ­vel buscar email do usuÃ¡rio:', userId);
+            console.log('⚠️ Não foi possível buscar email do usuário:', userId);
             userEmailMap[userId] = `user_${userId.slice(0, 8)}@sistema.local`;
           }
         }
       }
 
-      console.log('ðŸ“§ Mapa de emails final:', userEmailMap);
+      console.log('📧 Mapa de emails final:', userEmailMap);
 
       // Processar respostas
       const respostasProcessadas = (respostas || []).map(r => {
@@ -397,14 +400,14 @@ function DashboardContent() {
             ? JSON.parse(r.respostas) 
             : r.respostas;
         } catch (parseError) {
-          console.error('âŒ Erro ao parsear resposta:', parseError, r.respostas);
+          console.error('[ERRO] Erro ao parsear resposta:', parseError, r.respostas);
         }
 
-        // Pegar o email do mapa de usuÃ¡rios
+        // Pegar o email do mapa de usuários
         const userEmail = userEmailMap[r.respondido_por] || `user_${r.respondido_por.slice(0, 8)}@sistema.local`;
         
-        // Se o email for vÃ¡lido (contÃ©m @), usar sÃ³ a parte antes do @
-        // SenÃ£o, usar o email completo como nome
+        // Se o email for válido (contém @), usar só a parte antes do @
+        // Senão, usar o email completo como nome
         let userName;
         if (userEmail.includes('@')) {
           userName = userEmail; // Mostrar email completo
@@ -420,11 +423,11 @@ function DashboardContent() {
         };
       });
 
-      console.log('âœ… Respostas processadas:', respostasProcessadas);
+      console.log('✅ Respostas processadas:', respostasProcessadas);
       setRespostasFormulario(respostasProcessadas);
     } catch (err) {
-      console.error('âŒ Erro ao carregar resultados:', err);
-      showMessage('error', 'Erro ao carregar resultados do formulÃ¡rio: ' + err.message);
+      console.error('[ERRO] Erro ao carregar resultados:', err);
+      showMessage('error', 'Erro ao carregar resultados do formulário: ' + err.message);
     } finally {
       setLoadingRespostas(false);
     }
@@ -436,54 +439,54 @@ function DashboardContent() {
     setPerguntasFormulario([]);
   };
 
-  // FunÃ§Ã£o auxiliar para processar dados de grÃ¡fico de pizza
+  // Função auxiliar para processar dados de gráfico de pizza
   const processarDadosGraficoPizza = (pergunta) => {
-    console.log('ðŸ• Processando dados do grÃ¡fico para pergunta:', pergunta.id);
-    console.log('ðŸ“Š Total de respostas disponÃ­veis:', respostasFormulario.length);
+    console.log('[INFO] Processando dados do gráfico para pergunta:', pergunta.id);
+    console.log('📊 Total de respostas disponíveis:', respostasFormulario.length);
     
     const contagemOpcoes = {};
 
-    // Inicializar todas as opÃ§Ãµes com 0
+    // Inicializar todas as opções com 0
     pergunta.opcoes.forEach(opcao => {
       contagemOpcoes[opcao] = 0;
     });
 
-    console.log('ðŸ“‹ OpÃ§Ãµes inicializadas:', contagemOpcoes);
+    console.log('📋 Opções inicializadas:', contagemOpcoes);
 
     // Contar respostas
     respostasFormulario.forEach((resposta, idx) => {
-      console.log(`ðŸ“ Processando resposta ${idx + 1}:`, resposta.respostas_array);
+      console.log(`[ERRO] Processando resposta ${idx + 1}:`, resposta.respostas_array);
       
       const respostaItem = resposta.respostas_array.find(
         r => r.pergunta_id === pergunta.id
       );
 
-      console.log(`  âž¡ï¸ Resposta para pergunta ${pergunta.id}:`, respostaItem);
+      console.log(`  → Resposta para pergunta ${pergunta.id}:`, respostaItem);
 
       if (respostaItem && respostaItem.resposta) {
         if (Array.isArray(respostaItem.resposta)) {
-          // Checkbox - mÃºltiplas seleÃ§Ãµes
-          console.log('  âœ… Array detectado (checkbox):', respostaItem.resposta);
+          // Checkbox - múltiplas seleções
+          console.log('  ✅ Array detectado (checkbox):', respostaItem.resposta);
           respostaItem.resposta.forEach(opcao => {
             if (contagemOpcoes.hasOwnProperty(opcao)) {
               contagemOpcoes[opcao]++;
-              console.log(`    âž• Incrementando "${opcao}": ${contagemOpcoes[opcao]}`);
+              console.log(`    ➕ Incrementando "${opcao}": ${contagemOpcoes[opcao]}`);
             }
           });
         } else {
-          // MÃºltipla escolha - Ãºnica seleÃ§Ã£o
-          console.log('  âœ… String detectada (mÃºltipla escolha):', respostaItem.resposta);
+          // Múltipla escolha - única seleção
+          console.log('  ✅ String detectada (múltipla escolha):', respostaItem.resposta);
           if (contagemOpcoes.hasOwnProperty(respostaItem.resposta)) {
             contagemOpcoes[respostaItem.resposta]++;
-            console.log(`    âž• Incrementando "${respostaItem.resposta}": ${contagemOpcoes[respostaItem.resposta]}`);
+            console.log(`    ➕ Incrementando "${respostaItem.resposta}": ${contagemOpcoes[respostaItem.resposta]}`);
           }
         }
       } else {
-        console.log('  âš ï¸ Resposta vazia ou nÃ£o encontrada para esta pergunta');
+        console.log('  ⚠️ Resposta vazia ou não encontrada para esta pergunta');
       }
     });
 
-    console.log('ðŸ“Š Contagem final:', contagemOpcoes);
+    console.log('📊 Contagem final:', contagemOpcoes);
 
     // Converter para formato do Recharts e adicionar cores
     const cores = [
@@ -497,9 +500,9 @@ function DashboardContent() {
         value: valor,
         fill: cores[index % cores.length],
       }))
-      .filter(item => item.value > 0); // Mostrar apenas opÃ§Ãµes com votos
+      .filter(item => item.value > 0); // Mostrar apenas opções com votos
 
-    console.log('ðŸŽ¨ Dados formatados para o grÃ¡fico:', resultado);
+    console.log('🎨 Dados formatados para o gráfico:', resultado);
     
     return resultado;
   };
@@ -524,12 +527,12 @@ function DashboardContent() {
     {
       id: "elections",
       icon: BarChart3,
-      label: "EleiÃ§Ãµes 2022",
+      label: "Eleições 2022",
       active: currentScreen === "elections",
     },
     {
        id: "map",
-       icon: Map,  // jÃ¡ estÃ¡ importado
+       icon: Map,  // já está importado
        label: "Mapa Eleitoral",
        active: currentScreen === "map",
     },
@@ -542,7 +545,7 @@ function DashboardContent() {
     {
       id: "settings",
       icon: Settings,
-      label: "ConfiguraÃ§Ã£o",
+      label: "Configuração",
       active: currentScreen === "settings",
     },
   ];
@@ -550,8 +553,7 @@ function DashboardContent() {
   const navigate = useNavigate();
 
   const moreItems = [
-    { icon: Globe, label: "Idioma" },
-    { 
+    {
       icon: isDarkMode ? Sun : Moon, 
       label: isDarkMode ? "Modo Claro" : "Modo Escuro",
       onClick: toggleDarkMode 
@@ -561,7 +563,7 @@ function DashboardContent() {
       label: "Aprender",
       onClick: () => navigate('/aprender')
     },
-    { icon: HelpCircle, label: "Centro de Ajuda" },
+    { icon: HelpCircle, label: "Centro de Ajuda", onClick: () => setSupportChatOpen(true) },
     { 
       icon: Wrench, 
       label: "Retaguarda",
@@ -619,7 +621,7 @@ function DashboardContent() {
           <p className={`text-sm mt-1 ${
             isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
           }`}>
-            Esta Ã© a tela inicial da sua dashboard
+            Esta é a tela inicial da sua dashboard
           </p>
         </div>
 
@@ -640,7 +642,7 @@ function DashboardContent() {
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                   isDarkMode ? 'bg-[#3A3E55]' : 'bg-[#EDF3FF]'
                 }`}>
-                  <span className="text-xl">ðŸ’°</span>
+                  <span className="text-xl">💰</span>
                 </div>
               </div>
               
@@ -663,14 +665,14 @@ function DashboardContent() {
                   <div className={`text-xs ${
                     isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
                   }`}>
-                    moedas disponÃ­veis
+                    moedas disponíveis
                   </div>
                 </>
               )}
             </div>
           </div>
 
-          {/* Card de InformaÃ§Ãµes do UsuÃ¡rio */}
+          {/* Card de Informações do Usuário */}
           <div className={`rounded-lg border shadow-sm ${
             isDarkMode 
               ? 'bg-[#2A2E45] border-[#3A3E55]' 
@@ -681,12 +683,12 @@ function DashboardContent() {
                 <div className={`text-sm font-medium ${
                   isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
                 }`}>
-                  InformaÃ§Ãµes da Conta
+                  Informações da Conta
                 </div>
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                   isDarkMode ? 'bg-[#3A3E55]' : 'bg-[#EDF3FF]'
                 }`}>
-                  <span className="text-xl">ðŸ‘¤</span>
+                  <span className="text-xl">👤</span>
                 </div>
               </div>
               
@@ -730,7 +732,7 @@ function DashboardContent() {
                 <div className={`text-sm font-medium ${
                   isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
                 }`}>
-                  â­ Favoritos
+                  ⭐ Favoritos
                 </div>
                 <button
                   onClick={() => setShowAddFavorito(!showAddFavorito)}
@@ -778,7 +780,7 @@ function DashboardContent() {
                       <div className={`text-xs text-center py-2 ${
                         isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
                       }`}>
-                        Todos os itens jÃ¡ estÃ£o nos favoritos
+                        Todos os itens já estão nos favoritos
                       </div>
                     )}
                   </div>
@@ -799,7 +801,7 @@ function DashboardContent() {
                 <div className={`text-center py-4 ${
                   isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
                 }`}>
-                  <div className="text-2xl mb-2">â­</div>
+                  <div className="text-2xl mb-2">⭐</div>
                   <div className="text-xs">
                     Adicione suas abas favoritas
                   </div>
@@ -862,12 +864,12 @@ function DashboardContent() {
             <h1 className={`text-2xl font-semibold ${
               isDarkMode ? 'text-white' : 'text-[#2A2E45]'
             }`}>
-              EleiÃ§Ã£o Presidencial 2022
+              Eleição Presidencial 2022
             </h1>
             <p className={`text-sm mt-1 ${
               isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
             }`}>
-              Visualize os resultados dos turnos da eleiÃ§Ã£o presidencial
+              Visualize os resultados dos turnos da eleição presidencial
             </p>
           </div>
 
@@ -883,7 +885,7 @@ function DashboardContent() {
                   : "bg-white text-[#6F7689] border border-[#E4E9F2] hover:border-[#1570FF]"
               }`}
             >
-              1Âº Turno
+              1º Turno
             </button>
             <button
               onClick={() => setSelectedRound(2)}
@@ -895,12 +897,12 @@ function DashboardContent() {
                   : "bg-white text-[#6F7689] border border-[#E4E9F2] hover:border-[#1570FF]"
               }`}
             >
-              2Âº Turno
+              2º Turno
             </button>
           </div>
         </div>
 
-        {/* GrÃ¡fico */}
+        {/* Gráfico */}
         <div className={`flex-1 rounded-lg border shadow-sm min-h-[400px] ${
           isDarkMode 
             ? 'bg-[#2A2E45] border-[#3A3E55]' 
@@ -972,12 +974,12 @@ function DashboardContent() {
           <h1 className={`text-2xl font-semibold ${
             isDarkMode ? 'text-white' : 'text-[#2A2E45]'
           }`}>
-            Resultados dos FormulÃ¡rios
+            Resultados dos Formulários
           </h1>
           <p className={`text-sm mt-1 ${
             isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
           }`}>
-            Visualize e analise as respostas dos seus formulÃ¡rios
+            Visualize e analise as respostas dos seus formulários
           </p>
         </div>
 
@@ -987,7 +989,7 @@ function DashboardContent() {
             <div className="flex flex-col items-center gap-3">
               <div className="w-12 h-12 border-4 border-[#1570FF] border-t-transparent rounded-full animate-spin"></div>
               <div className={isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'}>
-                Carregando formulÃ¡rios...
+                Carregando formulários...
               </div>
             </div>
           </div>
@@ -996,9 +998,9 @@ function DashboardContent() {
             isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
           }`}>
             <Search className="w-16 h-16 mx-auto mb-4 opacity-50" />
-            <p className="text-lg font-medium mb-2">Nenhum formulÃ¡rio encontrado</p>
+            <p className="text-lg font-medium mb-2">Nenhum formulário encontrado</p>
             <p className="text-sm">
-              Crie formulÃ¡rios na Retaguarda para visualizar os resultados aqui
+              Crie formulários na Retaguarda para visualizar os resultados aqui
             </p>
           </div>
         ) : (
@@ -1102,7 +1104,7 @@ function DashboardContent() {
                 </button>
               </div>
 
-              {/* ConteÃºdo do Modal */}
+              {/* Conteúdo do Modal */}
               <div className="p-6 space-y-8">
                 {loadingRespostas ? (
                   <div className="flex items-center justify-center py-12">
@@ -1113,7 +1115,7 @@ function DashboardContent() {
                     isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
                   }`}>
                     <p className="text-lg font-medium mb-2">Nenhuma resposta ainda</p>
-                    <p className="text-sm">Este formulÃ¡rio ainda nÃ£o recebeu respostas</p>
+                    <p className="text-sm">Este formulário ainda não recebeu respostas</p>
                   </div>
                 ) : (
                   perguntasFormulario.map((pergunta, index) => (
@@ -1140,7 +1142,7 @@ function DashboardContent() {
 
                             return dadosGrafico.length > 0 ? (
                               <>
-                                {/* GrÃ¡fico de Pizza */}
+                                {/* Gráfico de Pizza */}
                                 <div className="flex items-center justify-center">
                                   <ResponsiveContainer width="100%" height={300}>
                                     <PieChart>
@@ -1172,7 +1174,7 @@ function DashboardContent() {
                                   </ResponsiveContainer>
                                 </div>
 
-                                {/* Legenda com estatÃ­sticas */}
+                                {/* Legenda com estatísticas */}
                                 <div className="grid grid-cols-2 gap-3">
                                   {dadosGrafico.map((item, index) => (
                                     <div
@@ -1232,7 +1234,7 @@ function DashboardContent() {
                                 <th className={`text-left py-3 px-4 font-medium ${
                                   isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
                                 }`}>
-                                  UsuÃ¡rio
+                                  Usuário
                                 </th>
                                 <th className={`text-left py-3 px-4 font-medium ${
                                   isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'
@@ -1312,12 +1314,12 @@ function DashboardContent() {
           <h1 className={`text-2xl font-semibold ${
             isDarkMode ? 'text-white' : 'text-[#2A2E45]'
           }`}>
-            ConfiguraÃ§Ãµes da Conta
+            Configurações da Conta
           </h1>
           <p className={`text-sm mt-1 ${
             isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
           }`}>
-            Gerencie suas informaÃ§Ãµes pessoais
+            Gerencie suas informações pessoais
           </p>
         </div>
 
@@ -1344,7 +1346,7 @@ function DashboardContent() {
             <h2 className={`text-lg font-semibold ${
               isDarkMode ? 'text-white' : 'text-[#2A2E45]'
             }`}>
-              Nome de ExibiÃ§Ã£o
+              Nome de Exibição
             </h2>
           </div>
           
@@ -1400,7 +1402,7 @@ function DashboardContent() {
               <label className={`block text-sm font-medium mb-2 ${
                 isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
               }`}>
-                EndereÃ§o de Email
+                Endereço de Email
               </label>
               <input
                 type="email"
@@ -1416,7 +1418,7 @@ function DashboardContent() {
               <p className={`text-xs mt-1 ${
                 isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
               }`}>
-                Um email de confirmaÃ§Ã£o serÃ¡ enviado para o novo endereÃ§o
+                Um email de confirmação será enviado para o novo endereço
               </p>
             </div>
 
@@ -1452,7 +1454,7 @@ function DashboardContent() {
               <label className={`block text-sm font-medium mb-2 ${
                 isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
               }`}>
-                NÃºmero de Telefone
+                Número de Telefone
               </label>
               <input
                 type="tel"
@@ -1468,7 +1470,7 @@ function DashboardContent() {
               <p className={`text-xs mt-1 ${
                 isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
               }`}>
-                Formato: +55 DDD NÃšMERO
+                Formato: +55 DDD NÚMERO
               </p>
             </div>
 
@@ -1483,7 +1485,7 @@ function DashboardContent() {
           </div>
         </div>
 
-        {/* InformaÃ§Ãµes da Conta */}
+        {/* Informações da Conta */}
         <div className={`rounded-lg border shadow-sm ${
           isDarkMode 
             ? 'bg-[#2A2E45] border-[#3A3E55]' 
@@ -1493,14 +1495,14 @@ function DashboardContent() {
             <h3 className={`text-lg font-semibold mb-4 ${
               isDarkMode ? 'text-white' : 'text-[#2A2E45]'
             }`}>
-              InformaÃ§Ãµes da Conta
+              Informações da Conta
             </h3>
             <div className="space-y-3 text-sm">
               <div className={`flex justify-between py-2 border-b ${
                 isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'
               }`}>
                 <span className={isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'}>
-                  ID do UsuÃ¡rio:
+                  ID do Usuário:
                 </span>
                 <span className={`font-mono ${isDarkMode ? 'text-white' : 'text-[#2A2E45]'}`}>
                   {user?.id?.slice(0, 8)}...
@@ -1546,7 +1548,7 @@ function DashboardContent() {
       default:
         return renderEmptyScreen(
           "Dashboard",
-          "Selecione uma opÃ§Ã£o no menu lateral",
+          "Selecione uma opção no menu lateral",
         );
     }
   };
@@ -1596,7 +1598,7 @@ function DashboardContent() {
           <div className={`text-[11px] font-semibold uppercase tracking-wider py-2 ${
             isDarkMode ? 'text-[#8A8FA6]' : 'text-[#8A8FA6]'
           }`}>
-            NavegaÃ§Ã£o
+            Navegação
           </div>
 
           <div className="space-y-1">
@@ -1652,7 +1654,7 @@ function DashboardContent() {
           <div className={`text-[11px] text-center ${
             isDarkMode ? 'text-[#8A8FA6]' : 'text-[#8A8FA6]'
           }`}>
-            Â© 2024 Minha Dashboard
+            © 2024 Minha Dashboard
           </div>
         </div>
       </div>
@@ -1724,6 +1726,12 @@ function DashboardContent() {
           {renderContent()}
         </div>
       </div>
+
+      <SupportChat
+        isOpen={supportChatOpen}
+        onClose={() => setSupportChatOpen(false)}
+        isDarkMode={isDarkMode}
+      />
     </div>
   );
 }

@@ -1,18 +1,12 @@
-import { useState, useEffect, useCallback, useMemo, memo } from "react";
+import { useState, useEffect } from "react";
 import {
-  ChevronDown,
   Home,
-  Map,
-  Search,
   Settings,
   Bell,
   Moon,
   Sun,
-  Globe,
   HelpCircle,
   BookOpen,
-  Wrench,
-  BarChart3,
   LogOut,
   Users,
   FileText,
@@ -28,6 +22,7 @@ import { useDarkMode } from "../../contexts/DarkModeContext";
 import { useAuth } from "../../contexts/AuthContext";
 import ProtectedRoute from "../../components/ProtectedRoute";
 import ProtectedRetaguardaRoute from "../../components/ProtectedRetaguardaRoute";
+import SupportChat from "../../components/SupportChat";
 import { supabase } from "../../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
 
@@ -73,6 +68,8 @@ function RetaguardaDashboardContent() {
   const [selectedUserForPermission, setSelectedUserForPermission] = useState(null);
 
   const [message, setMessage] = useState({ type: "", text: "" });
+  const [retaguardaChatOpen, setRetaguardaChatOpen] = useState(false);
+  const [chatToken, setChatToken] = useState('');
 
   const displayName = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Gerente';
 
@@ -90,28 +87,30 @@ function RetaguardaDashboardContent() {
     setTimeout(() => setMessage({ type: "", text: "" }), 5000);
   };
 
-  // Funções de gerenciamento de permissões
-  const handleConcederPermissao = async (userId) => {
+  // Helper: recarrega lista de usuários e permissões (server-side)
+  const recarregarUsuarios = async () => {
+    const token = await getToken();
+    const res = await fetch('/api/retaguarda/users', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const allUsers = await res.json();
+    setUsuariosPermitidos((allUsers || []).filter(u => u.tem_permissao));
+    setUsuariosNormais((allUsers || []).filter(u => !u.tem_permissao));
+  };
+
+  // Funções de gerenciamento de permissões (server-side, ignora RLS)
+  const handleConcederPermissao = async (targetUserId) => {
     try {
-      const { data, error } = await supabase
-        .rpc('conceder_permissao_retaguarda', {
-          target_user_id: userId,
-          observacao: 'Permissão concedida via dashboard'
-        });
-
-      if (error) throw error;
-
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/permissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'grant', targetUserId }),
+      });
+      if (!res.ok) throw new Error(await res.text());
       showMessage('success', 'Permissão concedida com sucesso!');
-      
-      // Recarregar listas
-      const { data: allUsers } = await supabase
-        .rpc('get_all_users_with_permissions');
-
-      const permitidos = (allUsers || []).filter(u => u.tem_permissao);
-      const normais = (allUsers || []).filter(u => !u.tem_permissao);
-
-      setUsuariosPermitidos(permitidos);
-      setUsuariosNormais(normais);
+      await recarregarUsuarios();
       setShowAddPermissaoModal(false);
     } catch (err) {
       console.error('Erro ao conceder permissão:', err);
@@ -119,28 +118,18 @@ function RetaguardaDashboardContent() {
     }
   };
 
-  const handleRevogarPermissao = async (userId) => {
+  const handleRevogarPermissao = async (targetUserId) => {
     if (!confirm('Deseja realmente revogar a permissão deste usuário?')) return;
-
     try {
-      const { data, error } = await supabase
-        .rpc('revogar_permissao_retaguarda', {
-          target_user_id: userId
-        });
-
-      if (error) throw error;
-
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/permissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'revoke', targetUserId }),
+      });
+      if (!res.ok) throw new Error(await res.text());
       showMessage('success', 'Permissão revogada com sucesso!');
-      
-      // Recarregar listas
-      const { data: allUsers } = await supabase
-        .rpc('get_all_users_with_permissions');
-
-      const permitidos = (allUsers || []).filter(u => u.tem_permissao);
-      const normais = (allUsers || []).filter(u => !u.tem_permissao);
-
-      setUsuariosPermitidos(permitidos);
-      setUsuariosNormais(normais);
+      await recarregarUsuarios();
     } catch (err) {
       console.error('Erro ao revogar permissão:', err);
       showMessage('error', err.message || 'Erro ao revogar permissão');
@@ -148,23 +137,24 @@ function RetaguardaDashboardContent() {
   };
 
 
-  // Buscar estatísticas
+  // Helper: obtém o token da sessão atual
+  const getToken = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ?? '';
+  };
+
+  // Buscar estatísticas (via servidor, ignora RLS)
   useEffect(() => {
     const fetchStats = async () => {
       try {
         setLoadingStats(true);
-        const { data, error } = await supabase
-          .from('stats_usuarios')
-          .select('*')
-          .single();
-
-        if (error) throw error;
-        setStats(data || {
-          total_usuarios: 0,
-          usuarios_hoje: 0,
-          usuarios_semana: 0,
-          usuarios_mes: 0,
+        const token = await getToken();
+        const res = await fetch('/api/retaguarda/stats', {
+          headers: { Authorization: `Bearer ${token}` },
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setStats(data);
       } catch (err) {
         console.error('Erro ao buscar stats:', err);
       } finally {
@@ -184,14 +174,14 @@ function RetaguardaDashboardContent() {
 
       try {
         setLoadingForms(true);
-        // Buscar TODOS os formulários (não apenas do usuário)
-        const { data, error } = await supabase
-          .from('formularios')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        setFormularios(data || []);
+        const token = await getToken();
+        const res = await fetch('/api/retaguarda/forms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: 'list' }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setFormularios(await res.json());
       } catch (err) {
         console.error('Erro ao buscar formulários:', err);
         showMessage('error', 'Erro ao carregar formulários');
@@ -210,15 +200,14 @@ function RetaguardaDashboardContent() {
 
       try {
         setLoadingFormsParaResponder(true);
-        // Buscar TODOS os formulários ativos (não apenas do usuário)
-        const { data, error } = await supabase
-          .from('formularios')
-          .select('*')
-          .eq('ativo', true)
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        setFormulariosParaResponder(data || []);
+        const token = await getToken();
+        const res = await fetch('/api/retaguarda/forms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: 'list', ativo: true }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setFormulariosParaResponder(await res.json());
       } catch (err) {
         console.error('Erro ao buscar formulários:', err);
         showMessage('error', 'Erro ao carregar formulários');
@@ -230,26 +219,22 @@ function RetaguardaDashboardContent() {
     fetchFormulariosParaResponder();
   }, [currentScreen]);
 
-  // Buscar usuários e permissões para tela de configurações
+  // Buscar usuários e permissões para tela de configurações (server-side)
   useEffect(() => {
     const fetchUsuariosEPermissoes = async () => {
       if (currentScreen !== 'settings') return;
 
       try {
         setLoadingPermissoes(true);
+        const token = await getToken();
+        const res = await fetch('/api/retaguarda/users', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const allUsers = await res.json();
 
-        // Buscar todos os usuários usando RPC
-        const { data: allUsers, error: usersError } = await supabase
-          .rpc('get_all_users_with_permissions');
-
-        if (usersError) throw usersError;
-
-        // Separar usuários com e sem permissão
-        const permitidos = (allUsers || []).filter(u => u.tem_permissao);
-        const normais = (allUsers || []).filter(u => !u.tem_permissao);
-
-        setUsuariosPermitidos(permitidos);
-        setUsuariosNormais(normais);
+        setUsuariosPermitidos((allUsers || []).filter(u => u.tem_permissao));
+        setUsuariosNormais((allUsers || []).filter(u => !u.tem_permissao));
       } catch (err) {
         console.error('Erro ao buscar usuários:', err);
         showMessage('error', 'Erro ao carregar usuários: ' + err.message);
@@ -281,12 +266,6 @@ function RetaguardaDashboardContent() {
       active: currentScreen === "map",
     },
     {
-      id: "search",
-      icon: Search,
-      label: "Pesquisa",
-      active: currentScreen === "search",
-    },
-    {
       id: "settings",
       icon: Settings,
       label: "Configuração",
@@ -295,18 +274,25 @@ function RetaguardaDashboardContent() {
   ];
 
   const moreItems = [
-    { icon: Globe, label: "Idioma" },
     {
       icon: isDarkMode ? Sun : Moon,
       label: isDarkMode ? "Modo Claro" : "Modo Escuro",
       onClick: toggleDarkMode
     },
-    { icon: BookOpen, label: "Aprender" },
-    { icon: HelpCircle, label: "Centro de Ajuda" },
+    { icon: BookOpen, label: "Aprender", onClick: () => navigate('/aprender') },
+    {
+      icon: HelpCircle,
+      label: "Centro de Ajuda",
+      onClick: async () => {
+        const token = await getToken();
+        setChatToken(token);
+        setRetaguardaChatOpen(true);
+      },
+    },
     {
       icon: ArrowLeft,
       label: "Voltar ao Dashboard",
-      onClick: () => navigate('/')
+      onClick: () => navigate('/dashboard')
     },
     {
       icon: LogOut,
@@ -348,75 +334,36 @@ function RetaguardaDashboardContent() {
     }
 
     try {
+      const token = await getToken();
+
       if (editingForm) {
-        // EDITAR FORMULÁRIO EXISTENTE
-        const { error: formError } = await supabase
-          .from('formularios')
-          .update({
+        // EDITAR FORMULÁRIO EXISTENTE (via servidor)
+        const res = await fetch('/api/retaguarda/forms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            action: 'update',
+            formId: editingForm.id,
             titulo: formTitle,
             descricao: formDescription,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', editingForm.id);
-
-        if (formError) throw formError;
-
-        // Deletar perguntas antigas
-        await supabase
-          .from('perguntas_formulario')
-          .delete()
-          .eq('formulario_id', editingForm.id);
-
-        // Inserir novas perguntas
-        const perguntasComOrdem = perguntas.map((p, index) => ({
-          formulario_id: editingForm.id,
-          ordem: index + 1,
-          texto: p.texto,
-          tipo: p.tipo,
-          obrigatoria: p.obrigatoria,
-          opcoes: (p.tipo === 'multipla_escolha' || p.tipo === 'checkbox') ? JSON.stringify(p.opcoes) : null,
-          validacao: p.validacao ? JSON.stringify(p.validacao) : null,
-        }));
-
-        const { error: perguntasError } = await supabase
-          .from('perguntas_formulario')
-          .insert(perguntasComOrdem);
-
-        if (perguntasError) throw perguntasError;
-
+            perguntas,
+          }),
+        });
+        if (!res.ok) throw new Error(await res.text());
         showMessage('success', 'Formulário atualizado com sucesso!');
       } else {
-        // CRIAR NOVO FORMULÁRIO
-        const { data: formData, error: formError } = await supabase
-          .from('formularios')
-          .insert({
+        // CRIAR NOVO FORMULÁRIO (via servidor)
+        const res = await fetch('/api/retaguarda/forms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            action: 'create',
             titulo: formTitle,
             descricao: formDescription,
-            criado_por: user.id,
-            ativo: true,
-          })
-          .select()
-          .single();
-
-        if (formError) throw formError;
-
-        // Criar perguntas
-        const perguntasComOrdem = perguntas.map((p, index) => ({
-          formulario_id: formData.id,
-          ordem: index + 1,
-          texto: p.texto,
-          tipo: p.tipo,
-          obrigatoria: p.obrigatoria,
-          opcoes: (p.tipo === 'multipla_escolha' || p.tipo === 'checkbox') ? JSON.stringify(p.opcoes) : null,
-          validacao: p.validacao ? JSON.stringify(p.validacao) : null,
-        }));
-
-        const { error: perguntasError } = await supabase
-          .from('perguntas_formulario')
-          .insert(perguntasComOrdem);
-
-        if (perguntasError) throw perguntasError;
-
+            perguntas,
+          }),
+        });
+        if (!res.ok) throw new Error(await res.text());
         showMessage('success', 'Formulário criado com sucesso!');
       }
 
@@ -427,12 +374,13 @@ function RetaguardaDashboardContent() {
       setPerguntas([]);
 
       // Recarregar lista
-      const { data: updatedForms } = await supabase
-        .from('formularios')
-        .select('*')
-        .eq('criado_por', user.id)
-        .order('created_at', { ascending: false });
-      setFormularios(updatedForms || []);
+      const tkn = await getToken();
+      const listRes = await fetch('/api/retaguarda/forms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tkn}` },
+        body: JSON.stringify({ action: 'list' }),
+      });
+      if (listRes.ok) setFormularios(await listRes.json());
 
     } catch (err) {
       console.error('Erro ao salvar formulário:', err);
@@ -467,12 +415,13 @@ function RetaguardaDashboardContent() {
     if (!confirm('Deseja realmente excluir este formulário?')) return;
 
     try {
-      const { error } = await supabase
-        .from('formularios')
-        .delete()
-        .eq('id', formId);
-
-      if (error) throw error;
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/forms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'delete', formId }),
+      });
+      if (!res.ok) throw new Error(await res.text());
 
       showMessage('success', 'Formulário excluído!');
       setFormularios(formularios.filter(f => f.id !== formId));
@@ -484,20 +433,23 @@ function RetaguardaDashboardContent() {
 
   const handleEditForm = async (form) => {
     try {
-      // Buscar perguntas do formulário
-      const { data: perguntasData, error } = await supabase
-        .from('perguntas_formulario')
-        .select('*')
-        .eq('formulario_id', form.id)
-        .order('ordem', { ascending: true });
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/forms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'get_questions', formId: form.id }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const perguntasData = await res.json();
 
-      if (error) throw error;
-
-      // Parsear opcoes de JSON para array
       const perguntasParseadas = perguntasData.map(p => ({
         ...p,
-        opcoes: p.opcoes ? JSON.parse(p.opcoes) : [],
-        validacao: p.validacao ? JSON.parse(p.validacao) : null,
+        opcoes: p.opcoes
+          ? (typeof p.opcoes === 'string' ? JSON.parse(p.opcoes) : p.opcoes)
+          : [],
+        validacao: p.validacao
+          ? (typeof p.validacao === 'string' ? JSON.parse(p.validacao) : p.validacao)
+          : null,
       }));
 
       setEditingForm(form);
@@ -534,19 +486,20 @@ function RetaguardaDashboardContent() {
 
   const handleResponderForm = async (form) => {
     try {
-      // Buscar perguntas do formulário
-      const { data: perguntasData, error } = await supabase
-        .from('perguntas_formulario')
-        .select('*')
-        .eq('formulario_id', form.id)
-        .order('ordem', { ascending: true });
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/forms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'get_questions', formId: form.id }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const perguntasData = await res.json();
 
-      if (error) throw error;
-
-      // Parsear opcoes
       const perguntasParseadas = perguntasData.map(p => ({
         ...p,
-        opcoes: p.opcoes ? JSON.parse(p.opcoes) : [],
+        opcoes: p.opcoes
+          ? (typeof p.opcoes === 'string' ? JSON.parse(p.opcoes) : p.opcoes)
+          : [],
       }));
 
       setRespondendoForm(form);
@@ -574,15 +527,17 @@ function RetaguardaDashboardContent() {
         resposta: respostas[p.id] || '',
       }));
 
-      const { error } = await supabase
-        .from('respostas_formulario')
-        .insert({
-          formulario_id: respondendoForm.id,
-          respondido_por: user.id,
-          respostas: JSON.stringify(respostasArray),
-        });
-
-      if (error) throw error;
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/forms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          action: 'submit_response',
+          formId: respondendoForm.id,
+          respostas: respostasArray,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
 
       showMessage('success', 'Resposta enviada com sucesso!');
       setRespondendoForm(null);
@@ -1743,11 +1698,6 @@ function RetaguardaDashboardContent() {
         return renderFormsScreen();
       case "map":
         return renderMapScreen();
-      case "search":
-        return renderEmptyScreen(
-          "Pesquisa",
-          "Funcionalidade em desenvolvimento"
-        );
       case "settings":
         return renderSettingsScreen();
       default:
@@ -1923,6 +1873,16 @@ function RetaguardaDashboardContent() {
           {renderContent()}
         </div>
       </div>
+
+      {/* Chat de Suporte — Retaguarda */}
+      <SupportChat
+        isOpen={retaguardaChatOpen}
+        onClose={() => setRetaguardaChatOpen(false)}
+        isDarkMode={isDarkMode}
+        chatEndpoint="/api/retaguarda/chat"
+        welcomeMessage="Olá! Sou o assistente de suporte da Retaguarda do OpinAI. Como posso ajudar?"
+        authToken={chatToken}
+      />
     </div>
   );
 }

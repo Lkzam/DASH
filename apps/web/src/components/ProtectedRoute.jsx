@@ -30,39 +30,34 @@ export default function ProtectedRoute({ children }) {
 
   const checkPlan = async () => {
     try {
-      const now = new Date().toISOString();
-      const email = user.email?.toLowerCase();
+      // Obtém o access_token da sessão Supabase atual
+      const { data: { session } } = await supabase.auth.getSession();
 
-      // Buscar plano ativo para este e-mail
-      const { data, error } = await supabase
-        .from('planos_usuario')
-        .select('id, status, data_fim, user_id')
-        .eq('email', email)
-        .eq('status', 'ativo')
-        .gte('data_fim', now)
-        .maybeSingle();
+      if (!session?.access_token) {
+        console.warn('[ProtectedRoute] Sem sessão ativa — redirecionando para login');
+        navigate('/login');
+        return;
+      }
 
-      if (error) {
-        console.error('Erro ao verificar plano:', error);
+      // Verifica o plano no servidor (usa service_role, ignora RLS)
+      const res = await fetch('/api/check-plan', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (!res.ok) {
+        console.error('[ProtectedRoute] /api/check-plan retornou', res.status);
         setPlanStatus('inactive');
         return;
       }
 
-      if (data) {
-        // Vincular user_id caso ainda não esteja linkado
-        if (!data.user_id && user.id) {
-          supabase
-            .from('planos_usuario')
-            .update({ user_id: user.id, updated_at: new Date().toISOString() })
-            .eq('id', data.id)
-            .then();
-        }
-        setPlanStatus('active');
-      } else {
-        setPlanStatus('inactive');
-      }
+      const { hasAccess, email, error } = await res.json();
+      if (error) console.error('[ProtectedRoute] Erro do servidor:', error);
+
+      setPlanStatus(hasAccess ? 'active' : 'inactive');
     } catch (err) {
-      console.error('Erro ao verificar plano:', err);
+      console.error('[ProtectedRoute] Erro ao verificar plano:', err);
       setPlanStatus('inactive');
     }
   };

@@ -22,26 +22,26 @@ export default function ProtectedRetaguardaRoute({ children }) {
       try {
         setChecking(true);
 
-        console.log('🔍 Verificando permissão para user:', user.id);
+        // Obtém o access_token da sessão Supabase atual
+        const { data: { session } } = await supabase.auth.getSession();
 
-        // CORREÇÃO: Remover .single() e verificar se retornou dados
-        const { data, error } = await supabase
-          .from('permissoes_retaguarda')
-          .select('ativo')
-          .eq('user_id', user.id)
-          .eq('ativo', true);
-
-        console.log('📊 Resultado da query:', { data, error });
-
-        if (error) {
-          console.error('❌ Erro ao verificar permissão:', error);
-          setHasPermission(false);
-        } else {
-          // Verifica se retornou algum resultado
-          const hasData = data && data.length > 0;
-          console.log(hasData ? '✅ Permissão encontrada!' : '❌ Sem permissão');
-          setHasPermission(hasData);
+        if (!session?.access_token) {
+          navigate('/login');
+          return;
         }
+
+        // Verifica permissão no servidor (service_role, ignora RLS)
+        const res = await fetch('/api/check-retaguarda', {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+
+        if (!res.ok) {
+          setHasPermission(false);
+          return;
+        }
+
+        const { hasPermission: perm } = await res.json();
+        setHasPermission(perm);
       } catch (err) {
         console.error('❌ Erro ao verificar permissão:', err);
         setHasPermission(false);
