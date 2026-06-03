@@ -341,6 +341,200 @@ app.post('/api/support/chat', async (c) => {
 });
 // ────────────────────────────────────────────────────────────────────────────
 
+// ── Helper: verifica token de qualquer usuário autenticado ───────────────────
+async function verificarUsuario(
+  supaUrl: string,
+  supaKey: string,
+  authHeader: string
+): Promise<{ ok: true; userId: string; email: string } | { ok: false; status: number; error: string }> {
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!token) return { ok: false, status: 401, error: 'Token não fornecido' };
+
+  const userRes = await fetch(`${supaUrl}/auth/v1/user`, {
+    headers: { apikey: supaKey, Authorization: `Bearer ${token}` },
+  });
+  if (!userRes.ok) return { ok: false, status: 401, error: 'Token inválido' };
+  const { id: userId, email } = await userRes.json();
+  if (!userId) return { ok: false, status: 401, error: 'Usuário sem ID' };
+
+  return { ok: true, userId, email: email ?? '' };
+}
+
+// ── Dados do usuário: favoritos, formulários, CPF ────────────────────────────
+app.post('/api/user/data', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = {
+    apikey: supaKey,
+    Authorization: `Bearer ${supaKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+
+  const auth = await verificarUsuario(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+  const { userId } = auth;
+
+  const body = await c.req.json();
+  const { action, favoriteId, screenId, screenLabel, formularioId, cpf } = body;
+
+  // ── FAVORITOS ──────────────────────────────────────────────
+  if (action === 'list_favorites') {
+    const res = await fetch(
+      `${supaUrl}/rest/v1/favoritos_usuario?user_id=eq.${userId}&order=created_at.asc`,
+      { headers: hdrs }
+    );
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json(await res.json());
+  }
+
+  if (action === 'add_favorite') {
+    if (!screenId || !screenLabel) return c.json({ error: 'screenId e screenLabel obrigatórios' }, 400);
+    // Evitar duplicata
+    const existRes = await fetch(
+      `${supaUrl}/rest/v1/favoritos_usuario?user_id=eq.${userId}&screen_id=eq.${screenId}`,
+      { headers: hdrs }
+    );
+    const existing: any[] = existRes.ok ? await existRes.json() : [];
+    if (existing.length > 0) return c.json({ error: 'Já está nos favoritos' }, 409);
+
+    const res = await fetch(`${supaUrl}/rest/v1/favoritos_usuario`, {
+      method: 'POST',
+      headers: hdrs,
+      body: JSON.stringify({ user_id: userId, screen_id: screenId, screen_label: screenLabel }),
+    });
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json({ ok: true });
+  }
+
+  if (action === 'remove_favorite') {
+    if (!favoriteId) return c.json({ error: 'favoriteId obrigatório' }, 400);
+    const res = await fetch(
+      `${supaUrl}/rest/v1/favoritos_usuario?id=eq.${favoriteId}&user_id=eq.${userId}`,
+      { method: 'DELETE', headers: hdrs }
+    );
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json({ ok: true });
+  }
+
+  // ── FORMULÁRIOS (pesquisa) ─────────────────────────────────
+  if (action === 'list_formularios') {
+    const formsRes = await fetch(
+      `${supaUrl}/rest/v1/formularios?select=*&order=created_at.desc`,
+      { headers: hdrs }
+    );
+    if (!formsRes.ok) return c.json({ error: await formsRes.text() }, 500);
+    const formularios: any[] = await formsRes.json();
+
+    // Buscar todos os IDs de respostas em um único request
+    const allRespostasRes = await fetch(
+      `${supaUrl}/rest/v1/respostas_formulario?select=formulario_id`,
+      { headers: hdrs }
+    );
+    const allRespostas: any[] = allRespostasRes.ok ? await allRespostasRes.json() : [];
+
+    const countMap: Record<string, number> = {};
+    allRespostas.forEach((r: any) => {
+      countMap[r.formulario_id] = (countMap[r.formulario_id] ?? 0) + 1;
+    });
+
+    return c.json(formularios.map(f => ({ ...f, total_respostas: countMap[f.id] ?? 0 })));
+  }
+
+  if (action === 'get_form_results') {
+    if (!formularioId) return c.json({ error: 'formularioId obrigatório' }, 400);
+
+    // Perguntas
+    const perguntasRes = await fetch(
+      `${supaUrl}/rest/v1/perguntas_formulario?formulario_id=eq.${formularioId}&order=ordem.asc`,
+      { headers: hdrs }
+    );
+    if (!perguntasRes.ok) return c.json({ error: await perguntasRes.text() }, 500);
+    const perguntas: any[] = await perguntasRes.json();
+
+    const perguntasParseadas = perguntas.map((p: any) => ({
+      ...p,
+      opcoes: p.opcoes
+        ? (typeof p.opcoes === 'string' ? JSON.parse(p.opcoes) : p.opcoes)
+        : [],
+    }));
+
+    // Respostas
+    const respostasRes = await fetch(
+      `${supaUrl}/rest/v1/respostas_formulario?formulario_id=eq.${formularioId}`,
+      { headers: hdrs }
+    );
+    if (!respostasRes.ok) return c.json({ error: await respostasRes.text() }, 500);
+    const respostas: any[] = await respostasRes.json();
+
+    // Buscar emails via Auth Admin API
+    const userIds = [...new Set(respostas.map((r: any) => r.respondido_por).filter(Boolean))];
+    const userMap: Record<string, string> = {};
+    for (const uid of userIds) {
+      try {
+        const uRes = await fetch(`${supaUrl}/auth/v1/admin/users/${uid}`, { headers: hdrs });
+        if (uRes.ok) {
+          const u = await uRes.json();
+          userMap[uid as string] = u.email ?? `user_${(uid as string).slice(0, 8)}`;
+        }
+      } catch { /* ignore */ }
+      if (!userMap[uid as string]) userMap[uid as string] = `user_${(uid as string).slice(0, 8)}`;
+    }
+
+    const respostasProcessadas = respostas.map((r: any) => {
+      let respostasArray: any[] = [];
+      try {
+        respostasArray = typeof r.respostas === 'string'
+          ? JSON.parse(r.respostas)
+          : (r.respostas ?? []);
+      } catch { /* ignore */ }
+      const userLabel = userMap[r.respondido_por] ?? `user_${r.respondido_por.slice(0, 8)}`;
+      return { ...r, respostas_array: respostasArray, user_email: userLabel, user_name: userLabel };
+    });
+
+    return c.json({ perguntas: perguntasParseadas, respostas: respostasProcessadas });
+  }
+
+  // ── CPF ────────────────────────────────────────────────────
+  if (action === 'get_cpf') {
+    const res = await fetch(
+      `${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${userId}&select=cpf`,
+      { headers: hdrs }
+    );
+    const data: any[] = res.ok ? await res.json() : [];
+    return c.json({ cpf: data[0]?.cpf ?? '' });
+  }
+
+  if (action === 'update_cpf') {
+    const cpfDigits = String(cpf ?? '').replace(/\D/g, '');
+    if (cpfDigits.length !== 11) return c.json({ error: 'CPF deve ter exatamente 11 dígitos' }, 400);
+
+    const existRes = await fetch(
+      `${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${userId}`,
+      { headers: hdrs }
+    );
+    const existing: any[] = existRes.ok ? await existRes.json() : [];
+
+    if (existing.length > 0) {
+      await fetch(`${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${userId}`, {
+        method: 'PATCH',
+        headers: hdrs,
+        body: JSON.stringify({ cpf: cpfDigits, updated_at: new Date().toISOString() }),
+      });
+    } else {
+      await fetch(`${supaUrl}/rest/v1/perfil_usuario`, {
+        method: 'POST',
+        headers: hdrs,
+        body: JSON.stringify({ user_id: userId, cpf: cpfDigits }),
+      });
+    }
+    return c.json({ ok: true });
+  }
+
+  return c.json({ error: 'Ação desconhecida' }, 400);
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ── Helper: verifica token + permissão de retaguarda ────────────────────────
 async function verificarRetaguarda(
   supaUrl: string,

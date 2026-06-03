@@ -32,11 +32,26 @@ function DashboardContent() {
   const { isDarkMode, toggleDarkMode } = useDarkMode();
   const { user, signOut } = useAuth();
 
+  // Helper: obtém token da sessão
+  const getToken = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token ?? '';
+  };
+
+  // Helper: formata CPF para exibição (12345678900 → 123.456.789-00)
+  const formatCpf = (value) => {
+    const d = value.replace(/\D/g, '').slice(0, 11);
+    if (d.length <= 3) return d;
+    if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`;
+    if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
+    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  };
+
   // Estados para a tela de configurações
   const [formData, setFormData] = useState({
     displayName: '',
     email: '',
-    phone: '',
+    cpf: '',
   });
   const [message, setMessage] = useState({ type: '', text: '' });
   const [isSaving, setIsSaving] = useState(false);
@@ -67,11 +82,11 @@ function DashboardContent() {
 
   // Atualizar formData quando o usuário mudar
   useEffect(() => {
-    setFormData({
+    setFormData(prev => ({
+      ...prev,
       displayName: displayName,
       email: userEmail,
-      phone: user?.phone || '',
-    });
+    }));
   }, [user, displayName, userEmail]);
 
   // Buscar saldo de moedas do usuário
@@ -104,25 +119,20 @@ function DashboardContent() {
     fetchSaldoMoedas();
   }, [user?.id]);
 
-  // Buscar favoritos do usuário
+  // Buscar favoritos do usuário (server-side)
   useEffect(() => {
     const fetchFavoritos = async () => {
       if (!user?.id) return;
-      
       try {
         setLoadingFavoritos(true);
-        const { data, error } = await supabase
-          .from('favoritos_usuario')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: true });
-
-        if (error) {
-          console.error('Erro ao buscar favoritos:', error);
-          setFavoritos([]);
-        } else {
-          setFavoritos(data || []);
-        }
+        const token = await getToken();
+        const res = await fetch('/api/user/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: 'list_favorites' }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setFavoritos(await res.json());
       } catch (err) {
         console.error('Erro ao buscar favoritos:', err);
         setFavoritos([]);
@@ -130,42 +140,23 @@ function DashboardContent() {
         setLoadingFavoritos(false);
       }
     };
-
     fetchFavoritos();
   }, [user?.id]);
 
-  // Buscar formulários com respostas para a tela de pesquisa
+  // Buscar formulários com contagem de respostas (server-side)
   useEffect(() => {
     const fetchFormulariosComRespostas = async () => {
       if (currentScreen !== 'search' || !user?.id) return;
-
       try {
         setLoadingFormularios(true);
-
-        // Buscar TODOS os formulários (não apenas do usuário)
-        const { data: formularios, error: formError } = await supabase
-          .from('formularios')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (formError) throw formError;
-
-        // Para cada formulário, contar quantas respostas tem
-        const formulariosComContagem = await Promise.all(
-          (formularios || []).map(async (form) => {
-            const { count, error: countError } = await supabase
-              .from('respostas_formulario')
-              .select('*', { count: 'exact', head: true })
-              .eq('formulario_id', form.id);
-
-            return {
-              ...form,
-              total_respostas: countError ? 0 : count || 0,
-            };
-          })
-        );
-
-        setFormulariosComRespostas(formulariosComContagem);
+        const token = await getToken();
+        const res = await fetch('/api/user/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: 'list_formularios' }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setFormulariosComRespostas(await res.json());
       } catch (err) {
         console.error('Erro ao buscar formulários:', err);
         showMessage('error', 'Erro ao carregar formulários');
@@ -173,7 +164,6 @@ function DashboardContent() {
         setLoadingFormularios(false);
       }
     };
-
     fetchFormulariosComRespostas();
   }, [currentScreen, user?.id]);
 
@@ -218,52 +208,73 @@ function DashboardContent() {
     }
   };
 
-  const handleSavePhone = async () => {
+  const handleSaveCpf = async () => {
+    const cpfDigits = formData.cpf.replace(/\D/g, '');
+    if (cpfDigits.length !== 11) {
+      showMessage('error', 'CPF inválido. Digite 11 dígitos numéricos.');
+      return;
+    }
     setIsSaving(true);
     try {
-      const { error } = await supabase.auth.updateUser({
-        phone: formData.phone
+      const token = await getToken();
+      const res = await fetch('/api/user/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'update_cpf', cpf: cpfDigits }),
       });
-
-      if (error) throw error;
-      showMessage('success', 'Telefone atualizado com sucesso!');
+      if (!res.ok) throw new Error(await res.text());
+      showMessage('success', 'CPF salvo com sucesso!');
     } catch (error) {
-      showMessage('error', error.message || 'Erro ao atualizar telefone');
+      showMessage('error', 'Erro ao salvar CPF');
     } finally {
       setIsSaving(false);
     }
   };
+
+  // Carrega CPF ao abrir a tela de configurações
+  useEffect(() => {
+    if (currentScreen !== 'settings' || !user?.id) return;
+    const loadCpf = async () => {
+      try {
+        const token = await getToken();
+        const res = await fetch('/api/user/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: 'get_cpf' }),
+        });
+        if (res.ok) {
+          const { cpf } = await res.json();
+          setFormData(prev => ({ ...prev, cpf: cpf ? formatCpf(cpf) : '' }));
+        }
+      } catch { /* silencioso */ }
+    };
+    loadCpf();
+  }, [currentScreen, user?.id]);
 
   const handleAddFavorito = async (screenId) => {
     try {
       const navItem = navItems.find(item => item.id === screenId);
       if (!navItem) return;
 
-      // Verifica se já existe
-      const jaExiste = favoritos.some(fav => fav.screen_id === screenId);
-      if (jaExiste) {
+      const token = await getToken();
+      const res = await fetch('/api/user/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'add_favorite', screenId, screenLabel: navItem.label }),
+      });
+      if (res.status === 409) {
         showMessage('error', 'Este item já está nos favoritos!');
         return;
       }
+      if (!res.ok) throw new Error(await res.text());
 
-      const { error } = await supabase
-        .from('favoritos_usuario')
-        .insert({
-          user_id: user.id,
-          screen_id: screenId,
-          screen_label: navItem.label,
-        });
-
-      if (error) throw error;
-
-      // Atualiza a lista local
-      const { data } = await supabase
-        .from('favoritos_usuario')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true });
-
-      setFavoritos(data || []);
+      // Recarrega lista atualizada
+      const listRes = await fetch('/api/user/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'list_favorites' }),
+      });
+      if (listRes.ok) setFavoritos(await listRes.json());
       setShowAddFavorito(false);
       showMessage('success', `"${navItem.label}" adicionado aos favoritos!`);
     } catch (error) {
@@ -274,14 +285,13 @@ function DashboardContent() {
 
   const handleRemoveFavorito = async (favoritoId) => {
     try {
-      const { error } = await supabase
-        .from('favoritos_usuario')
-        .delete()
-        .eq('id', favoritoId);
-
-      if (error) throw error;
-
-      // Atualiza a lista local
+      const token = await getToken();
+      const res = await fetch('/api/user/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'remove_favorite', favoriteId: favoritoId }),
+      });
+      if (!res.ok) throw new Error(await res.text());
       setFavoritos(favoritos.filter(fav => fav.id !== favoritoId));
       showMessage('success', 'Favorito removido!');
     } catch (error) {
@@ -295,139 +305,19 @@ function DashboardContent() {
       setLoadingRespostas(true);
       setFormularioSelecionado(formulario);
 
-      console.log('[INFO] Carregando resultados do formulário:', formulario.id);
-
-      // Buscar perguntas do formulário
-      const { data: perguntas, error: perguntasError } = await supabase
-        .from('perguntas_formulario')
-        .select('*')
-        .eq('formulario_id', formulario.id)
-        .order('ordem', { ascending: true });
-
-      if (perguntasError) {
-        console.error('[ERRO] Erro ao buscar perguntas:', perguntasError);
-        throw perguntasError;
-      }
-
-      console.log('✅ Perguntas encontradas:', perguntas?.length || 0);
-
-      // Parsear opções das perguntas
-      const perguntasParseadas = (perguntas || []).map(p => ({
-        ...p,
-        opcoes: p.opcoes ? JSON.parse(p.opcoes) : [],
-      }));
-
-      setPerguntasFormulario(perguntasParseadas);
-
-      // Buscar todas as respostas do formulário
-      const { data: respostas, error: respostasError } = await supabase
-        .from('respostas_formulario')
-        .select('*')
-        .eq('formulario_id', formulario.id);
-
-      if (respostasError) {
-        console.error('[ERRO] Erro ao buscar respostas:', respostasError);
-        throw respostasError;
-      }
-
-      console.log('✅ Respostas brutas encontradas:', respostas);
-
-      // Buscar emails dos usuários que responderam
-      const userIds = [...new Set(respostas.map(r => r.respondido_por))];
-      
-      console.log('📧 Buscando emails de', userIds.length, 'usuários');
-
-      // MÉTODO 1: Tentar usar RPC primeiro
-      let { data: usersData, error: usersError } = await supabase
-        .rpc('get_users_by_ids', { user_ids: userIds });
-
-      // MÉTODO 2: Se RPC falhar, tentar usar VIEW
-      if (!usersData || usersError) {
-        console.log('⚠️ RPC nao funcionou, tentando VIEW usuarios_publicos');
-        
-        const { data: viewData, error: viewError } = await supabase
-          .from('usuarios_publicos')
-          .select('id, email, display_name')
-          .in('id', userIds);
-        
-        if (viewData && !viewError) {
-          console.log('✅ Emails obtidos via VIEW:', viewData.length);
-          usersData = viewData;
-          usersError = null;
-        }
-      }
-
-      // Criar mapa de emails
-      const userEmailMap = {};
-      
-      if (usersData && !usersError && usersData.length > 0) {
-        console.log('✅ Emails obtidos com sucesso:', usersData.length);
-        usersData.forEach(u => {
-          userEmailMap[u.id] = u.email || u.display_name || `user_${u.id.slice(0, 8)}`;
-        });
-      } else {
-        console.log('[ERRO] Não foi possível buscar emails. Usando fallback.');
-        
-        // MÉTODO 3: Fallback - buscar via query direta (última tentativa)
-        for (const userId of userIds) {
-          try {
-            // Tentar buscar email através da VIEW
-            const { data: singleUser } = await supabase
-              .from('usuarios_publicos')
-              .select('email')
-              .eq('id', userId)
-              .single();
-            
-            if (singleUser?.email) {
-              userEmailMap[userId] = singleUser.email;
-            } else {
-              userEmailMap[userId] = `user_${userId.slice(0, 8)}@sistema.local`;
-            }
-          } catch (err) {
-            console.log('⚠️ Não foi possível buscar email do usuário:', userId);
-            userEmailMap[userId] = `user_${userId.slice(0, 8)}@sistema.local`;
-          }
-        }
-      }
-
-      console.log('📧 Mapa de emails final:', userEmailMap);
-
-      // Processar respostas
-      const respostasProcessadas = (respostas || []).map(r => {
-        let respostasArray = [];
-        try {
-          respostasArray = typeof r.respostas === 'string' 
-            ? JSON.parse(r.respostas) 
-            : r.respostas;
-        } catch (parseError) {
-          console.error('[ERRO] Erro ao parsear resposta:', parseError, r.respostas);
-        }
-
-        // Pegar o email do mapa de usuários
-        const userEmail = userEmailMap[r.respondido_por] || `user_${r.respondido_por.slice(0, 8)}@sistema.local`;
-        
-        // Se o email for válido (contém @), usar só a parte antes do @
-        // Senão, usar o email completo como nome
-        let userName;
-        if (userEmail.includes('@')) {
-          userName = userEmail; // Mostrar email completo
-        } else {
-          userName = userEmail;
-        }
-
-        return {
-          ...r,
-          respostas_array: respostasArray,
-          user_email: userEmail,
-          user_name: userName,
-        };
+      const token = await getToken();
+      const res = await fetch('/api/user/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'get_form_results', formularioId: formulario.id }),
       });
-
-      console.log('✅ Respostas processadas:', respostasProcessadas);
-      setRespostasFormulario(respostasProcessadas);
+      if (!res.ok) throw new Error(await res.text());
+      const { perguntas, respostas } = await res.json();
+      setPerguntasFormulario(perguntas);
+      setRespostasFormulario(respostas);
     } catch (err) {
       console.error('[ERRO] Erro ao carregar resultados:', err);
-      showMessage('error', 'Erro ao carregar resultados do formulário: ' + err.message);
+      showMessage('error', 'Erro ao carregar resultados do formulário');
     } finally {
       setLoadingRespostas(false);
     }
@@ -1433,10 +1323,10 @@ function DashboardContent() {
           </div>
         </div>
 
-        {/* Card de Telefone */}
+        {/* Card de CPF */}
         <div className={`rounded-lg border shadow-sm ${
-          isDarkMode 
-            ? 'bg-[#2A2E45] border-[#3A3E55]' 
+          isDarkMode
+            ? 'bg-[#2A2E45] border-[#3A3E55]'
             : 'bg-white border-[#E4E9F2]'
         }`}>
           <div className={`p-4 border-b ${
@@ -1445,42 +1335,44 @@ function DashboardContent() {
             <h2 className={`text-lg font-semibold ${
               isDarkMode ? 'text-white' : 'text-[#2A2E45]'
             }`}>
-              Telefone
+              CPF
             </h2>
           </div>
-          
+
           <div className="p-4 space-y-4">
             <div>
               <label className={`block text-sm font-medium mb-2 ${
                 isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
               }`}>
-                Número de Telefone
+                CPF (Cadastro de Pessoa Física)
               </label>
               <input
-                type="tel"
-                value={formData.phone}
-                onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                type="text"
+                value={formData.cpf}
+                onChange={(e) => setFormData({ ...formData, cpf: formatCpf(e.target.value) })}
                 className={`w-full px-4 py-2 border rounded-lg outline-none transition-all ${
                   isDarkMode
                     ? 'bg-[#1A1D21] border-[#3A3E55] text-white focus:border-[#1570FF]'
                     : 'bg-white border-[#E4E9F2] text-[#2A2E45] focus:ring-2 focus:ring-[#1570FF] focus:border-transparent'
                 }`}
-                placeholder="+55 (11) 98765-4321"
+                placeholder="000.000.000-00"
+                maxLength={14}
+                inputMode="numeric"
               />
               <p className={`text-xs mt-1 ${
                 isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'
               }`}>
-                Formato: +55 DDD NÚMERO
+                Somente números — 11 dígitos
               </p>
             </div>
 
             <button
-              onClick={handleSavePhone}
+              onClick={handleSaveCpf}
               disabled={isSaving}
               className="flex items-center gap-2 bg-[#1570FF] text-white px-6 py-2 rounded-lg hover:bg-[#0D4FB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Settings className="w-4 h-4" />
-              {isSaving ? 'Salvando...' : 'Salvar Telefone'}
+              {isSaving ? 'Salvando...' : 'Salvar CPF'}
             </button>
           </div>
         </div>
@@ -1718,6 +1610,17 @@ function DashboardContent() {
             </div>
           </div>
         </div>
+
+        {/* Banner global de mensagens */}
+        {message.text && (
+          <div className={`mx-6 mt-4 px-4 py-3 rounded-lg text-sm font-medium ${
+            message.type === 'success'
+              ? 'bg-green-50 text-green-700 border border-green-200'
+              : 'bg-red-50 text-red-700 border border-red-200'
+          }`}>
+            {message.text}
+          </div>
+        )}
 
         {/* Content Area */}
         <div className={`flex-1 overflow-auto ${
