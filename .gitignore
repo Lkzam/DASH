@@ -128,6 +128,14 @@ apps/web/public/data/*.py
 apps/web/public/data/*.p12
 
 # ============================================================
+# MIGRAÇÃO DE BANCO — arquivos temporários, NÃO commitar
+# ============================================================
+# CSVs exportados do Supabase antigo (contêm dados de usuários — PII)
+apps/web/Database migration/
+# Scripts e SQLs de migração pontual (usados uma única vez)
+apps/web/admin-permanente.sql
+
+# ============================================================
 # MISC
 # ============================================================
 .vercel
