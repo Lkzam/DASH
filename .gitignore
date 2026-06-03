@@ -134,6 +134,7 @@ apps/web/public/data/*.p12
 apps/web/Database migration/
 # Scripts e SQLs de migração pontual (usados uma única vez)
 apps/web/admin-permanente.sql
+apps/web/SQL/
 
 # ============================================================
 # MISC
