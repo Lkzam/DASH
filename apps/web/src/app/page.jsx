@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import FloatingLines from '../components/FloatingLines';
+import { PLANOS, TIERS } from '../config/planos.js';
 
 const features = [
   {
@@ -54,7 +55,7 @@ const steps = [
   {
     num: '01',
     title: 'Escolha seu plano',
-    desc: 'Selecione o plano mensal ou anual e efetue o pagamento via PIX ou cartão.',
+    desc: 'Selecione o plano (Básico, Médio ou Máximo) e efetue o pagamento via PIX ou cartão.',
   },
   {
     num: '02',
@@ -68,39 +69,20 @@ const steps = [
   },
 ];
 
-const plans = [
-  {
-    id: 'mensal',
-    name: 'Mensal',
-    price: 'R$ 99',
-    period: '/mês',
-    desc: 'Ideal para acompanhar eleições pontuais',
-    highlight: false,
-    items: [
-      'Dashboard completo',
-      'Mapa eleitoral interativo',
-      'Pesquisas ilimitadas',
-      'Análise de eleições 2022',
-      'Suporte por e-mail',
-    ],
-  },
-  {
-    id: 'anual',
-    name: 'Anual',
-    price: 'R$ 890',
-    period: '/ano',
-    badge: 'Economize 25%',
-    desc: 'Melhor custo-benefício para campanhas',
-    highlight: true,
-    items: [
-      'Tudo do plano mensal',
-      'Histórico eleitoral completo',
-      'Relatórios exportáveis',
-      'Acesso antecipado a novidades',
-      'Suporte prioritário',
-    ],
-  },
-];
+// Planos derivados da fonte única (src/config/planos.js). O Médio é destacado.
+const plans = TIERS.map((t) => {
+  const p = PLANOS[t];
+  return {
+    id: p.id,
+    name: p.nome,
+    price: p.precoLabel,
+    period: `/${p.periodo.replace('por ', '')}`,
+    desc: p.descricao,
+    items: p.itens,
+    highlight: t === 'medio',
+    badge: t === 'medio' ? 'Mais popular' : undefined,
+  };
+});
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -318,7 +300,7 @@ export default function LandingPage() {
             <p className="text-[#8A8FA6] text-lg">Escolha o plano que melhor se adapta às suas necessidades</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
             {plans.map((plan) => (
               <div
                 key={plan.id}

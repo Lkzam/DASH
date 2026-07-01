@@ -1,23 +1,13 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import nodeConsole from 'node:console';
-import { skipCSRFCheck } from '@auth/core';
-import Credentials from '@auth/core/providers/credentials';
-import { authHandler, initAuthConfig } from '@hono/auth-js';
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import { hash, verify } from 'argon2';
 import { Hono } from 'hono';
-import { contextStorage, getContext } from 'hono/context-storage';
+import { contextStorage } from 'hono/context-storage';
 import { cors } from 'hono/cors';
-import { proxy } from 'hono/proxy';
 import { requestId } from 'hono/request-id';
 import { createHonoServer } from 'react-router-hono-server/node';
 import { serializeError } from 'serialize-error';
-import ws from 'ws';
-import NeonAdapter from './adapter';
 import { getHTMLForErrorPage } from './get-html-for-error-page';
-import { isAuthAction } from './is-auth-action';
 import { API_BASENAME, api } from './route-builder';
-neonConfig.webSocketConstructor = ws;
 
 const als = new AsyncLocalStorage<{ requestId: string }>();
 
@@ -34,11 +24,6 @@ for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   };
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
-const adapter = NeonAdapter(pool);
-
 const app = new Hono();
 
 app.use('*', requestId());
@@ -50,15 +35,48 @@ app.use('*', (c, next) => {
 
 app.use(contextStorage());
 
+// ── Rate limiting simples em memória, por IP+rota ───────────────────────────
+// Protege endpoints custosos (IA/Groq) e sensíveis (pagamento/auth) contra
+// abuso e força-bruta. OBS: in-memory serve p/ instância única; em ambiente
+// multi-instância, migrar para Redis/Upstash.
+const rateBuckets = new Map<string, { count: number; reset: number }>();
+function rateLimit(opts: { windowMs: number; max: number }) {
+  return async (c: any, next: any) => {
+    const ip =
+      c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
+      c.req.header('x-real-ip') ||
+      'unknown';
+    const key = `${ip}:${c.req.path}`;
+    const now = Date.now();
+    const b = rateBuckets.get(key);
+    if (!b || now > b.reset) {
+      rateBuckets.set(key, { count: 1, reset: now + opts.windowMs });
+    } else {
+      b.count++;
+      if (b.count > opts.max) {
+        return c.json({ error: 'Muitas requisições. Tente novamente em instantes.' }, 429);
+      }
+    }
+    return next();
+  };
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of rateBuckets) if (now > v.reset) rateBuckets.delete(k);
+}, 60_000).unref?.();
+
+// Aplicar limites nos endpoints nativos do Hono (custo/abuso):
+app.use('/api/support/chat', rateLimit({ windowMs: 60_000, max: 20 }));
+app.use('/api/retaguarda/chat', rateLimit({ windowMs: 60_000, max: 20 }));
+app.use('/api/check-plan', rateLimit({ windowMs: 60_000, max: 40 }));
+app.use('/api/check-retaguarda', rateLimit({ windowMs: 60_000, max: 40 }));
+app.use('/api/user/data', rateLimit({ windowMs: 60_000, max: 80 }));
+
+// Não vaza detalhes internos (stack/serializeError) para o cliente.
 app.onError((err, c) => {
+  console.error('[onError]', serializeError(err));
   if (c.req.method !== 'GET') {
-    return c.json(
-      {
-        error: 'An error occurred in your app',
-        details: serializeError(err),
-      },
-      500
-    );
+    return c.json({ error: 'Ocorreu um erro no servidor.' }, 500);
   }
   return c.html(getHTMLForErrorPage(err), 200);
 });
@@ -72,167 +90,10 @@ if (process.env.CORS_ORIGINS) {
   );
 }
 
-if (process.env.AUTH_SECRET) {
-  app.use(
-    '*',
-    initAuthConfig((c) => ({
-      secret: c.env.AUTH_SECRET,
-      pages: {
-        signIn: '/account/signin',
-        signOut: '/account/logout',
-      },
-      skipCSRFCheck,
-      session: {
-        strategy: 'jwt',
-      },
-      callbacks: {
-        session({ session, token }) {
-          if (token.sub) {
-            session.user.id = token.sub;
-          }
-          return session;
-        },
-      },
-      cookies: {
-        csrfToken: {
-          options: {
-            secure: true,
-            sameSite: 'none',
-          },
-        },
-        sessionToken: {
-          options: {
-            secure: true,
-            sameSite: 'none',
-          },
-        },
-        callbackUrl: {
-          options: {
-            secure: true,
-            sameSite: 'none',
-          },
-        },
-      },
-      providers: [
-        Credentials({
-          id: 'credentials-signin',
-          name: 'Credentials Sign in',
-          credentials: {
-            email: {
-              label: 'Email',
-              type: 'email',
-            },
-            password: {
-              label: 'Password',
-              type: 'password',
-            },
-          },
-          authorize: async (credentials) => {
-            const { email, password } = credentials;
-            if (!email || !password) {
-              return null;
-            }
-            if (typeof email !== 'string' || typeof password !== 'string') {
-              return null;
-            }
-
-            // logic to verify if user exists
-            const user = await adapter.getUserByEmail(email);
-            if (!user) {
-              return null;
-            }
-            const matchingAccount = user.accounts.find(
-              (account) => account.provider === 'credentials'
-            );
-            const accountPassword = matchingAccount?.password;
-            if (!accountPassword) {
-              return null;
-            }
-
-            const isValid = await verify(accountPassword, password);
-            if (!isValid) {
-              return null;
-            }
-
-            // return user object with the their profile data
-            return user;
-          },
-        }),
-        Credentials({
-          id: 'credentials-signup',
-          name: 'Credentials Sign up',
-          credentials: {
-            email: {
-              label: 'Email',
-              type: 'email',
-            },
-            password: {
-              label: 'Password',
-              type: 'password',
-            },
-          },
-          authorize: async (credentials) => {
-            const { email, password } = credentials;
-            if (!email || !password) {
-              return null;
-            }
-            if (typeof email !== 'string' || typeof password !== 'string') {
-              return null;
-            }
-
-            // logic to verify if user exists
-            const user = await adapter.getUserByEmail(email);
-            if (!user) {
-              const newUser = await adapter.createUser({
-                id: crypto.randomUUID(),
-                emailVerified: null,
-                email,
-              });
-              await adapter.linkAccount({
-                extraData: {
-                  password: await hash(password),
-                },
-                type: 'credentials',
-                userId: newUser.id,
-                providerAccountId: newUser.id,
-                provider: 'credentials',
-              });
-              return newUser;
-            }
-            return null;
-          },
-        }),
-      ],
-    }))
-  );
-}
-app.all('/integrations/:path{.+}', async (c, next) => {
-  const queryParams = c.req.query();
-  const url = `${process.env.NEXT_PUBLIC_CREATE_BASE_URL ?? 'https://www.create.xyz'}/integrations/${c.req.param('path')}${Object.keys(queryParams).length > 0 ? `?${new URLSearchParams(queryParams).toString()}` : ''}`;
-
-  return proxy(url, {
-    method: c.req.method,
-    body: c.req.raw.body ?? null,
-    // @ts-ignore - this key is accepted even if types not aware and is
-    // required for streaming integrations
-    duplex: 'half',
-    redirect: 'manual',
-    headers: {
-      ...c.req.header(),
-      'X-Forwarded-For': process.env.NEXT_PUBLIC_CREATE_HOST,
-      'x-createxyz-host': process.env.NEXT_PUBLIC_CREATE_HOST,
-      Host: process.env.NEXT_PUBLIC_CREATE_HOST,
-      'x-createxyz-project-group-id': process.env.NEXT_PUBLIC_PROJECT_GROUP_ID,
-    },
-  });
-});
-
-app.use('/api/auth/*', async (c, next) => {
-  if (isAuthAction(c.req.path)) {
-    return authHandler()(c, next);
-  }
-  return next();
-});
+// NOTA: A autenticação do app é 100% Supabase Auth (client → JWT → servidor
+// valida em /auth/v1/user). O sistema legado @hono/auth-js (Credentials + Neon)
+// e o proxy /integrations/* do scaffold create.xyz foram REMOVIDOS por não
+// serem usados e representarem superfície de ataque (CSRF desabilitado).
 
 // ── Suporte IA ──────────────────────────────────────────────────────────────
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
@@ -247,7 +108,10 @@ SOBRE O OPINAI:
 - Sistema de favoritos e saldo de moedas
 - Painel admin (Retaguarda) para gestores
 
-PLANOS: Mensal R$99 (30 dias) | Anual R$890 (365 dias). Pagamento via PIX ou cartão.
+PLANOS (3 tiers, acesso por 30 dias, pagamento via PIX ou cartão):
+- Básico — R$150: ver todas as pesquisas + acesso ao banco de dados eleitoral.
+- Médio — R$300: tudo do Básico + poder requisitar pesquisas personalizadas (cota mensal).
+- Máximo — R$1.500: tudo do Médio + pesquisas ilimitadas e prioridade máxima.
 
 PROBLEMAS COMUNS:
 - Sem acesso após pagamento: aguarde alguns minutos e faça logout/login
@@ -360,6 +224,68 @@ async function verificarUsuario(
   return { ok: true, userId, email: email ?? '' };
 }
 
+// Mapa de níveis dos tiers — ESPELHA src/config/planos.js (fonte de verdade).
+// Mantido inline para o servidor não depender de import cross-JS.
+const NIVEL_TIER: Record<string, number> = { basico: 1, medio: 2, maximo: 3 };
+
+// ── Helper: verifica token + PLANO ATIVO (paywall server-side) ──────────────
+// nivelMinimo: 1 = básico, 2 = médio, 3 = máximo.
+// Retorna 402 (sem plano ativo) ou 403 (plano insuficiente p/ o recurso).
+async function verificarPlano(
+  supaUrl: string,
+  supaKey: string,
+  authHeader: string,
+  nivelMinimo = 1
+): Promise<
+  | {
+      ok: true;
+      userId: string;
+      email: string;
+      tier: string;
+      nivel: number;
+      cota: number | null; // null = ilimitado; 0 = nenhum
+      dataInicio: string | null;
+    }
+  | { ok: false; status: number; error: string }
+> {
+  const base = await verificarUsuario(supaUrl, supaKey, authHeader);
+  if (!base.ok) return base;
+  const { userId, email } = base;
+
+  const now = new Date().toISOString();
+  const planRes = await fetch(
+    `${supaUrl}/rest/v1/planos_usuario?select=tier,status,data_fim,data_inicio,permanente,pesquisas_cota&email=eq.${encodeURIComponent(
+      email
+    )}&limit=20`,
+    { headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Accept: 'application/json' } }
+  );
+  const plans: any[] = planRes.ok ? await planRes.json() : [];
+  const ativos = plans.filter(
+    (p) => p.permanente === true || (p.status === 'ativo' && p.data_fim && p.data_fim >= now)
+  );
+  if (ativos.length === 0)
+    return { ok: false, status: 402, error: 'Nenhum plano ativo. Assine para acessar.' };
+
+  // Plano ativo de maior nível é o que vale
+  const winner = ativos.reduce((melhor, p) =>
+    (NIVEL_TIER[p.tier] ?? 1) > (NIVEL_TIER[melhor.tier] ?? 1) ? p : melhor
+  );
+  const nivel = NIVEL_TIER[winner.tier] ?? 1;
+  const tier = (Object.keys(NIVEL_TIER).find((t) => NIVEL_TIER[t] === nivel) ?? 'basico');
+  if (nivel < nivelMinimo)
+    return { ok: false, status: 403, error: 'Seu plano não inclui este recurso. Faça upgrade.' };
+
+  return {
+    ok: true,
+    userId,
+    email,
+    tier,
+    nivel,
+    cota: winner.pesquisas_cota ?? null,
+    dataInicio: winner.data_inicio ?? null,
+  };
+}
+
 // ── Dados do usuário: favoritos, formulários, CPF ────────────────────────────
 app.post('/api/user/data', async (c) => {
   const supaUrl = process.env.SUPABASE_URL!;
@@ -371,7 +297,9 @@ app.post('/api/user/data', async (c) => {
     Accept: 'application/json',
   };
 
-  const auth = await verificarUsuario(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  // Paywall server-side: exige plano ativo (>= básico). Fecha o bypass em que
+  // um usuário logado sem pagar acessava os dados chamando a API direto.
+  const auth = await verificarPlano(supaUrl, supaKey, c.req.header('Authorization') ?? '', 1);
   if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
   const { userId } = auth;
 
@@ -390,9 +318,9 @@ app.post('/api/user/data', async (c) => {
 
   if (action === 'add_favorite') {
     if (!screenId || !screenLabel) return c.json({ error: 'screenId e screenLabel obrigatórios' }, 400);
-    // Evitar duplicata
+    // Evitar duplicata (screenId é controlado pelo cliente → escapar na URL)
     const existRes = await fetch(
-      `${supaUrl}/rest/v1/favoritos_usuario?user_id=eq.${userId}&screen_id=eq.${screenId}`,
+      `${supaUrl}/rest/v1/favoritos_usuario?user_id=eq.${userId}&screen_id=eq.${encodeURIComponent(String(screenId))}`,
       { headers: hdrs }
     );
     const existing: any[] = existRes.ok ? await existRes.json() : [];
@@ -409,8 +337,10 @@ app.post('/api/user/data', async (c) => {
 
   if (action === 'remove_favorite') {
     if (!favoriteId) return c.json({ error: 'favoriteId obrigatório' }, 400);
+    // favoriteId é controlado pelo cliente → escapar na URL. O guard
+    // user_id=eq.${userId} garante que só remove favorito do próprio usuário.
     const res = await fetch(
-      `${supaUrl}/rest/v1/favoritos_usuario?id=eq.${favoriteId}&user_id=eq.${userId}`,
+      `${supaUrl}/rest/v1/favoritos_usuario?id=eq.${encodeURIComponent(String(favoriteId))}&user_id=eq.${userId}`,
       { method: 'DELETE', headers: hdrs }
     );
     if (!res.ok) return c.json({ error: await res.text() }, 500);
@@ -529,6 +459,98 @@ app.post('/api/user/data', async (c) => {
       });
     }
     return c.json({ ok: true });
+  }
+
+  return c.json({ error: 'Ação desconhecida' }, 400);
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Solicitações de pesquisa (Fase 2 — planos Médio e Máximo) ───────────────
+// Médio: cota mensal (pesquisas_cota). Máximo: ilimitado + prioridade 'alta'.
+app.post('/api/user/survey', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = {
+    apikey: supaKey,
+    Authorization: `Bearer ${supaKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+
+  const body = await c.req.json().catch(() => ({}));
+  const { action } = body;
+
+  // Conta solicitações do ciclo atual (desde data_inicio do plano).
+  async function contarUsadas(userId: string, dataInicio: string | null): Promise<number> {
+    let url = `${supaUrl}/rest/v1/solicitacoes_pesquisa?select=id&user_id=eq.${userId}`;
+    if (dataInicio) url += `&created_at=gte.${encodeURIComponent(dataInicio)}`;
+    const r = await fetch(url, { headers: hdrs });
+    const rows: any[] = r.ok ? await r.json() : [];
+    return rows.length;
+  }
+
+  // LISTAR as próprias solicitações (qualquer plano ativo)
+  if (action === 'list_mine') {
+    const auth = await verificarPlano(supaUrl, supaKey, c.req.header('Authorization') ?? '', 1);
+    if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+    const res = await fetch(
+      `${supaUrl}/rest/v1/solicitacoes_pesquisa?user_id=eq.${auth.userId}&order=created_at.desc`,
+      { headers: hdrs }
+    );
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json(await res.json());
+  }
+
+  // CONSULTAR cota (para a UI mostrar quanto resta)
+  if (action === 'quota') {
+    const auth = await verificarPlano(supaUrl, supaKey, c.req.header('Authorization') ?? '', 1);
+    if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+    const usadas = await contarUsadas(auth.userId, auth.dataInicio);
+    const restante = auth.cota === null ? null : Math.max(0, auth.cota - usadas);
+    return c.json({ tier: auth.tier, nivel: auth.nivel, cota: auth.cota, usadas, restante });
+  }
+
+  // CRIAR solicitação (exige Médio ou Máximo)
+  if (action === 'create') {
+    const auth = await verificarPlano(supaUrl, supaKey, c.req.header('Authorization') ?? '', 2);
+    if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+
+    const titulo = String(body.titulo ?? '').trim();
+    const objetivo = String(body.objetivo ?? '').trim();
+    const publicoAlvo = String(body.publico_alvo ?? '').trim();
+    const detalhes = String(body.detalhes ?? '').trim();
+    if (!titulo || !objetivo)
+      return c.json({ error: 'Título e objetivo são obrigatórios.' }, 400);
+
+    // Cota (Médio). Máximo tem cota null = ilimitado.
+    if (auth.cota !== null) {
+      const usadas = await contarUsadas(auth.userId, auth.dataInicio);
+      if (usadas >= auth.cota)
+        return c.json(
+          { error: `Cota de ${auth.cota} pesquisas atingida neste ciclo. Faça upgrade para o plano Máximo.` },
+          429
+        );
+    }
+
+    const prioridade = auth.tier === 'maximo' ? 'alta' : 'normal';
+    const res = await fetch(`${supaUrl}/rest/v1/solicitacoes_pesquisa`, {
+      method: 'POST',
+      headers: { ...hdrs, Prefer: 'return=representation' },
+      body: JSON.stringify({
+        user_id: auth.userId,
+        email: auth.email,
+        tier: auth.tier,
+        titulo,
+        objetivo,
+        publico_alvo: publicoAlvo || null,
+        detalhes: detalhes || null,
+        prioridade,
+        status: 'pendente',
+      }),
+    });
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    const [nova] = await res.json();
+    return c.json({ ok: true, solicitacao: nova });
   }
 
   return c.json({ error: 'Ação desconhecida' }, 400);
@@ -830,6 +852,71 @@ PROBLEMAS COMUNS NA RETAGUARDA:
 
 Se não souber a resposta exata, indique que o administrador técnico deve ser consultado. Nunca invente dados ou procedimentos.`;
 
+// ── Retaguarda: fila de solicitações de pesquisa ────────────────────────────
+app.post('/api/retaguarda/survey-requests', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = {
+    apikey: supaKey,
+    Authorization: `Bearer ${supaKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+
+  const auth = await verificarRetaguarda(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+
+  const body = await c.req.json().catch(() => ({}));
+  const { action } = body;
+
+  // LISTAR toda a fila (ordenada: pendentes → prioridade alta → mais antigas)
+  if (action === 'list') {
+    const res = await fetch(`${supaUrl}/rest/v1/solicitacoes_pesquisa?order=created_at.asc`, {
+      headers: hdrs,
+    });
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    const rows: any[] = await res.json();
+    const pesoStatus: Record<string, number> = {
+      pendente: 0,
+      em_andamento: 1,
+      concluida: 2,
+      rejeitada: 3,
+    };
+    rows.sort((a, b) => {
+      const s = (pesoStatus[a.status] ?? 9) - (pesoStatus[b.status] ?? 9);
+      if (s !== 0) return s;
+      if (a.prioridade !== b.prioridade) return a.prioridade === 'alta' ? -1 : 1;
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+    return c.json(rows);
+  }
+
+  // ATUALIZAR status / parecer de uma solicitação
+  if (action === 'update_status') {
+    const { id, status, resposta_admin } = body;
+    const validos = ['pendente', 'em_andamento', 'concluida', 'rejeitada'];
+    if (!id || !validos.includes(status))
+      return c.json({ error: 'id e status válido são obrigatórios' }, 400);
+    const res = await fetch(
+      `${supaUrl}/rest/v1/solicitacoes_pesquisa?id=eq.${encodeURIComponent(String(id))}`,
+      {
+        method: 'PATCH',
+        headers: hdrs,
+        body: JSON.stringify({
+          status,
+          resposta_admin: resposta_admin ?? null,
+          updated_at: new Date().toISOString(),
+        }),
+      }
+    );
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json({ ok: true });
+  }
+
+  return c.json({ error: 'Ação desconhecida' }, 400);
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
 app.post('/api/retaguarda/chat', async (c) => {
   const supaUrl = process.env.SUPABASE_URL!;
   const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -1064,6 +1151,15 @@ async function supabaseRPC(functionName: string, params: Record<string, string>)
 // GET /api/electoral/municipios?uf=SP&cargo=6
 // Retorna: [{ nome: "SÃO PAULO", codigo: "SÃO PAULO" }, ...]
 app.get('/api/electoral/municipios', async (c) => {
+  // Banco de dados eleitoral = recurso pago (>= básico). Paywall server-side.
+  const auth = await verificarPlano(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    c.req.header('Authorization') ?? '',
+    1
+  );
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+
   const uf = (c.req.query('uf') ?? '').toUpperCase();
   const cargo = c.req.query('cargo') ?? '6';
   if (!uf) return c.json({ error: 'Parâmetro uf obrigatório' }, 400);
@@ -1086,6 +1182,15 @@ app.get('/api/electoral/municipios', async (c) => {
 // GET /api/electoral/candidatos?uf=SP&municipio=SÃO%20PAULO&cargo=6
 // Retorna: { candidatos: [...], totalVotos: number, municipio: string }
 app.get('/api/electoral/candidatos', async (c) => {
+  // Banco de dados eleitoral = recurso pago (>= básico). Paywall server-side.
+  const auth = await verificarPlano(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    c.req.header('Authorization') ?? '',
+    1
+  );
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+
   const uf = (c.req.query('uf') ?? '').toUpperCase();
   const municipio = c.req.query('municipio') ?? '';
   const cargo = c.req.query('cargo') ?? '6';

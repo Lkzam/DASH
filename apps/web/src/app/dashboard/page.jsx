@@ -15,6 +15,9 @@ import {
   LogOut,
   Plus,
   X,
+  FileText,
+  Send,
+  Lock,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import ElectionChart from "../../components/ElectionChart";
@@ -75,6 +78,18 @@ function DashboardContent() {
   const [respostasFormulario, setRespostasFormulario] = useState([]);
   const [perguntasFormulario, setPerguntasFormulario] = useState([]);
   const [loadingRespostas, setLoadingRespostas] = useState(false);
+
+  // Estados para "Requisitar Pesquisa" (Fase 2 — planos Médio/Máximo)
+  const [surveyQuota, setSurveyQuota] = useState(null); // { tier, nivel, cota, usadas, restante }
+  const [surveyList, setSurveyList] = useState([]);
+  const [loadingSurvey, setLoadingSurvey] = useState(false);
+  const [submittingSurvey, setSubmittingSurvey] = useState(false);
+  const [surveyForm, setSurveyForm] = useState({
+    titulo: '',
+    objetivo: '',
+    publico_alvo: '',
+    detalhes: '',
+  });
 
   // Extrair dados do usuário
   const userEmail = user?.email || 'usuario@email.com';
@@ -407,6 +422,56 @@ function DashboardContent() {
       .slice(0, 2);
   };
 
+  // ── Requisitar Pesquisa: carregar cota + minhas solicitações ──────────────
+  const loadSurveyData = async () => {
+    setLoadingSurvey(true);
+    try {
+      const token = await getToken();
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+      const [qRes, lRes] = await Promise.all([
+        fetch('/api/user/survey', { method: 'POST', headers, body: JSON.stringify({ action: 'quota' }) }),
+        fetch('/api/user/survey', { method: 'POST', headers, body: JSON.stringify({ action: 'list_mine' }) }),
+      ]);
+      setSurveyQuota(qRes.ok ? await qRes.json() : null);
+      setSurveyList(lRes.ok ? await lRes.json() : []);
+    } catch (err) {
+      console.error('[survey] erro ao carregar:', err);
+    } finally {
+      setLoadingSurvey(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentScreen === 'requestSurvey' && user?.id) loadSurveyData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentScreen, user?.id]);
+
+  const handleSubmitSurvey = async (e) => {
+    e.preventDefault();
+    if (!surveyForm.titulo.trim() || !surveyForm.objetivo.trim()) {
+      showMessage('error', 'Preencha o título e o objetivo da pesquisa.');
+      return;
+    }
+    setSubmittingSurvey(true);
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/user/survey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'create', ...surveyForm }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao enviar solicitação');
+      showMessage('success', 'Solicitação de pesquisa enviada com sucesso!');
+      setSurveyForm({ titulo: '', objetivo: '', publico_alvo: '', detalhes: '' });
+      loadSurveyData();
+    } catch (err) {
+      showMessage('error', err.message);
+    } finally {
+      setSubmittingSurvey(false);
+    }
+  };
+
   const navItems = [
     {
       id: "home",
@@ -431,6 +496,12 @@ function DashboardContent() {
       icon: Search,
       label: "Pesquisa",
       active: currentScreen === "search",
+    },
+    {
+      id: "requestSurvey",
+      icon: FileText,
+      label: "Requisitar Pesquisa",
+      active: currentScreen === "requestSurvey",
     },
     {
       id: "settings",
@@ -1425,6 +1496,158 @@ function DashboardContent() {
     );
   };
 
+  const renderRequestSurveyScreen = () => {
+    const STATUS = {
+      pendente: { label: 'Pendente', cls: 'bg-amber-100 text-amber-700' },
+      em_andamento: { label: 'Em andamento', cls: 'bg-blue-100 text-blue-700' },
+      concluida: { label: 'Concluída', cls: 'bg-green-100 text-green-700' },
+      rejeitada: { label: 'Rejeitada', cls: 'bg-red-100 text-red-700' },
+    };
+    const card = isDarkMode ? 'bg-[#2A2E45] border-[#3A3E55]' : 'bg-white border-[#E4E9F2]';
+    const txt = isDarkMode ? 'text-white' : 'text-[#2A2E45]';
+    const sub = isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]';
+    const inputCls = `w-full px-4 py-2.5 rounded-lg border outline-none focus:ring-2 focus:ring-[#1570FF] ${
+      isDarkMode ? 'bg-[#1A1D21] border-[#3A3E55] text-white' : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+    }`;
+
+    // Sem plano Médio/Máximo → tela de upgrade
+    const bloqueado = !surveyQuota || (surveyQuota.nivel ?? 0) < 2;
+
+    if (loadingSurvey && !surveyQuota) {
+      return <div className={`p-8 ${sub}`}>Carregando...</div>;
+    }
+
+    if (bloqueado) {
+      return (
+        <div className="max-w-2xl mx-auto py-10">
+          <div className={`rounded-2xl border p-8 text-center ${card}`}>
+            <div className="w-16 h-16 rounded-full bg-[#1570FF]/10 flex items-center justify-center mx-auto mb-5">
+              <Lock className="w-8 h-8 text-[#1570FF]" />
+            </div>
+            <h2 className={`text-2xl font-bold mb-2 ${txt}`}>Recurso dos planos Médio e Máximo</h2>
+            <p className={`${sub} mb-6`}>
+              Requisitar pesquisas personalizadas está disponível a partir do plano <b>Médio</b>.
+              Faça upgrade para solicitar pesquisas feitas sob medida para sua campanha.
+            </p>
+            <button
+              onClick={() => navigate('/planos?tipo=medio')}
+              className="bg-[#1570FF] text-white px-8 py-3 rounded-xl font-semibold hover:bg-[#0D4FB8] transition-colors"
+            >
+              Ver planos
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    const restanteLabel =
+      surveyQuota.restante === null ? 'Ilimitado' : `${surveyQuota.restante} restante(s)`;
+
+    return (
+      <div className="max-w-4xl mx-auto py-6 space-y-6">
+        {/* Cota */}
+        <div className={`rounded-2xl border p-5 flex items-center justify-between ${card}`}>
+          <div>
+            <p className={`text-sm ${sub}`}>Seu plano</p>
+            <p className={`text-lg font-bold capitalize ${txt}`}>{surveyQuota.tier}</p>
+          </div>
+          <div className="text-right">
+            <p className={`text-sm ${sub}`}>Pesquisas neste ciclo</p>
+            <p className="text-lg font-bold text-[#1570FF]">{restanteLabel}</p>
+          </div>
+        </div>
+
+        {/* Formulário */}
+        <form onSubmit={handleSubmitSurvey} className={`rounded-2xl border p-6 space-y-4 ${card}`}>
+          <h2 className={`text-xl font-bold ${txt}`}>Nova solicitação de pesquisa</h2>
+          <div>
+            <label className={`block text-sm font-medium mb-1 ${txt}`}>Título *</label>
+            <input
+              className={inputCls}
+              value={surveyForm.titulo}
+              onChange={(e) => setSurveyForm((p) => ({ ...p, titulo: e.target.value }))}
+              placeholder="Ex: Intenção de voto para prefeito em Campinas"
+              maxLength={120}
+            />
+          </div>
+          <div>
+            <label className={`block text-sm font-medium mb-1 ${txt}`}>Objetivo da pesquisa *</label>
+            <textarea
+              className={inputCls}
+              rows={3}
+              value={surveyForm.objetivo}
+              onChange={(e) => setSurveyForm((p) => ({ ...p, objetivo: e.target.value }))}
+              placeholder="O que você quer descobrir?"
+            />
+          </div>
+          <div>
+            <label className={`block text-sm font-medium mb-1 ${txt}`}>Público-alvo</label>
+            <input
+              className={inputCls}
+              value={surveyForm.publico_alvo}
+              onChange={(e) => setSurveyForm((p) => ({ ...p, publico_alvo: e.target.value }))}
+              placeholder="Ex: eleitores de 18-35 anos na zona sul"
+            />
+          </div>
+          <div>
+            <label className={`block text-sm font-medium mb-1 ${txt}`}>Detalhes adicionais</label>
+            <textarea
+              className={inputCls}
+              rows={2}
+              value={surveyForm.detalhes}
+              onChange={(e) => setSurveyForm((p) => ({ ...p, detalhes: e.target.value }))}
+              placeholder="Observações, prazo desejado, etc. (opcional)"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={submittingSurvey || surveyQuota.restante === 0}
+            className="flex items-center gap-2 bg-[#1570FF] text-white px-6 py-3 rounded-xl font-semibold hover:bg-[#0D4FB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Send className="w-4 h-4" />
+            {surveyQuota.restante === 0 ? 'Cota atingida' : submittingSurvey ? 'Enviando...' : 'Enviar solicitação'}
+          </button>
+        </form>
+
+        {/* Minhas solicitações */}
+        <div>
+          <h3 className={`text-lg font-bold mb-3 ${txt}`}>Minhas solicitações</h3>
+          {surveyList.length === 0 ? (
+            <p className={sub}>Você ainda não fez nenhuma solicitação.</p>
+          ) : (
+            <div className="space-y-3">
+              {surveyList.map((s) => {
+                const st = STATUS[s.status] || STATUS.pendente;
+                return (
+                  <div key={s.id} className={`rounded-xl border p-4 ${card}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <p className={`font-semibold ${txt}`}>{s.titulo}</p>
+                        <p className={`text-sm mt-1 ${sub}`}>{s.objetivo}</p>
+                        {s.resposta_admin && (
+                          <p className={`text-sm mt-2 ${txt}`}>
+                            <b>Retorno:</b> {s.resposta_admin}
+                          </p>
+                        )}
+                      </div>
+                      <span className={`text-xs font-medium px-3 py-1 rounded-full whitespace-nowrap ${st.cls}`}>
+                        {st.label}
+                      </span>
+                    </div>
+                    <p className={`text-xs mt-2 ${sub}`}>
+                      {new Date(s.created_at).toLocaleDateString('pt-BR')}
+                      {s.prioridade === 'alta' && ' · Prioridade alta'}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (currentScreen) {
       case "home":
@@ -1435,6 +1658,8 @@ function DashboardContent() {
         return <AnaliseEleitoral />;
       case "search":
         return renderSearchScreen();
+      case "requestSurvey":
+        return renderRequestSurveyScreen();
       case "settings":
         return renderSettingsScreen();
       default:

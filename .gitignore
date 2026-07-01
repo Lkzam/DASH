@@ -119,13 +119,18 @@ $RECYCLE.BIN/
 *.pfx
 
 # ============================================================
-# DADOS ELEITORAIS TSE (arquivos grandes)
+# DADOS ELEITORAIS TSE (arquivos grandes / dados premium)
+# NUNCA versionar nem publicar em public/ — são dados pagos e pesados (~5GB).
+# Regra abrangente (qualquer profundidade) como defesa em profundidade.
 # ============================================================
+apps/web/public/data/**/*.csv
 apps/web/public/data/*.csv
-apps/web/public/data/municipios_sp/*.csv
-!apps/web/public/data/municipios_sp/index.json
+apps/web/public/data/**/*.py
 apps/web/public/data/*.py
 apps/web/public/data/*.p12
+apps/web/public/data/*.json
+apps/web/public/data/**/*.json
+!apps/web/public/data/municipios_sp/index.json
 
 # ============================================================
 # MIGRAÇÃO DE BANCO — arquivos temporários, NÃO commitar

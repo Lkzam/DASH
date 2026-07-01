@@ -32,10 +32,11 @@ OpinAI é uma plataforma de análise eleitoral que oferece:
 
 ## PLANOS E PREÇOS
 
-| Plano  | Preço       | Duração |
-|--------|-------------|---------|
-| Mensal | R$ 99,00    | 30 dias |
-| Anual  | R$ 890,00   | 365 dias |
+| Plano  | Preço       | O que inclui (acesso por 30 dias) |
+|--------|-------------|-----------------------------------|
+| Básico | R$ 150,00   | Ver todas as pesquisas + banco de dados eleitoral |
+| Médio  | R$ 300,00   | Tudo do Básico + requisitar pesquisas (cota mensal) |
+| Máximo | R$ 1.500,00 | Tudo do Médio + pesquisas ilimitadas e prioridade |
 
 O pagamento é feito via PIX ou cartão de crédito através do sistema AbacatePay.
 Após o pagamento ser confirmado, o acesso é liberado automaticamente.

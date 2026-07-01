@@ -17,6 +17,7 @@ import {
   Save,
   X,
   ArrowLeft,
+  Inbox,
 } from "lucide-react";
 import { useDarkMode } from "../../contexts/DarkModeContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -66,6 +67,10 @@ function RetaguardaDashboardContent() {
   const [loadingPermissoes, setLoadingPermissoes] = useState(true);
   const [showAddPermissaoModal, setShowAddPermissaoModal] = useState(false);
   const [selectedUserForPermission, setSelectedUserForPermission] = useState(null);
+
+  // Estados para a fila de solicitações de pesquisa (Fase 2)
+  const [solicitacoes, setSolicitacoes] = useState([]);
+  const [loadingSolicitacoes, setLoadingSolicitacoes] = useState(false);
 
   const [message, setMessage] = useState({ type: "", text: "" });
   const [retaguardaChatOpen, setRetaguardaChatOpen] = useState(false);
@@ -246,6 +251,48 @@ function RetaguardaDashboardContent() {
     fetchUsuariosEPermissoes();
   }, [currentScreen]);
 
+  // ── Solicitações de pesquisa: carregar fila + atualizar status ────────────
+  const carregarSolicitacoes = async () => {
+    setLoadingSolicitacoes(true);
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/survey-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'list' }),
+      });
+      setSolicitacoes(res.ok ? await res.json() : []);
+    } catch (err) {
+      console.error('[solicitacoes] erro:', err);
+    } finally {
+      setLoadingSolicitacoes(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentScreen === 'requests') carregarSolicitacoes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentScreen]);
+
+  const atualizarStatusSolicitacao = async (id, status, resposta_admin) => {
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/survey-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'update_status', id, status, resposta_admin }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || 'Erro ao atualizar');
+      }
+      showMessage('success', 'Solicitação atualizada!');
+      carregarSolicitacoes();
+    } catch (err) {
+      showMessage('error', err.message);
+    }
+  };
+
   const navItems = [
     {
       id: "home",
@@ -264,6 +311,12 @@ function RetaguardaDashboardContent() {
       icon: Eye,
       label: "Responder",
       active: currentScreen === "map",
+    },
+    {
+      id: "requests",
+      icon: Inbox,
+      label: "Solicitações",
+      active: currentScreen === "requests",
     },
     {
       id: "settings",
@@ -1690,6 +1743,105 @@ function RetaguardaDashboardContent() {
     );
   };
 
+  const renderRequestsScreen = () => {
+    const STATUS = {
+      pendente: { label: 'Pendente', cls: 'bg-amber-500/20 text-amber-300' },
+      em_andamento: { label: 'Em andamento', cls: 'bg-blue-500/20 text-blue-300' },
+      concluida: { label: 'Concluída', cls: 'bg-green-500/20 text-green-300' },
+      rejeitada: { label: 'Rejeitada', cls: 'bg-red-500/20 text-red-300' },
+    };
+    const card = isDarkMode ? 'bg-[#2A2E45] border-[#3A3E55]' : 'bg-white border-[#E4E9F2]';
+    const txt = isDarkMode ? 'text-white' : 'text-[#2A2E45]';
+    const sub = isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]';
+
+    const btn = 'text-xs font-medium px-3 py-1.5 rounded-lg transition-colors';
+
+    return (
+      <div className="max-w-4xl mx-auto py-6">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className={`text-2xl font-bold ${txt}`}>Solicitações de pesquisa</h2>
+          <button
+            onClick={carregarSolicitacoes}
+            className="text-sm px-4 py-2 rounded-lg bg-[#1570FF] text-white hover:bg-[#0D4FB8] transition-colors"
+          >
+            Atualizar
+          </button>
+        </div>
+
+        {loadingSolicitacoes ? (
+          <p className={sub}>Carregando fila...</p>
+        ) : solicitacoes.length === 0 ? (
+          <p className={sub}>Nenhuma solicitação de pesquisa no momento.</p>
+        ) : (
+          <div className="space-y-3">
+            {solicitacoes.map((s) => {
+              const st = STATUS[s.status] || STATUS.pendente;
+              return (
+                <div key={s.id} className={`rounded-xl border p-4 ${card}`}>
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className={`font-semibold ${txt}`}>{s.titulo}</p>
+                        {s.prioridade === 'alta' && (
+                          <span className="text-xs font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-300">
+                            PRIORIDADE
+                          </span>
+                        )}
+                        <span className={`text-xs px-2 py-0.5 rounded capitalize ${sub}`}>{s.tier}</span>
+                      </div>
+                      <p className={`text-sm mt-1 ${sub}`}>{s.email}</p>
+                    </div>
+                    <span className={`text-xs font-medium px-3 py-1 rounded-full whitespace-nowrap ${st.cls}`}>
+                      {st.label}
+                    </span>
+                  </div>
+
+                  <div className={`text-sm space-y-1 ${txt}`}>
+                    <p><b>Objetivo:</b> {s.objetivo}</p>
+                    {s.publico_alvo && <p><b>Público-alvo:</b> {s.publico_alvo}</p>}
+                    {s.detalhes && <p><b>Detalhes:</b> {s.detalhes}</p>}
+                    {s.resposta_admin && <p className={sub}><b>Retorno enviado:</b> {s.resposta_admin}</p>}
+                  </div>
+
+                  <p className={`text-xs mt-2 ${sub}`}>
+                    Recebida em {new Date(s.created_at).toLocaleString('pt-BR')}
+                  </p>
+
+                  <div className="flex gap-2 mt-3 flex-wrap">
+                    <button
+                      onClick={() => atualizarStatusSolicitacao(s.id, 'em_andamento')}
+                      className={`${btn} bg-blue-500/20 text-blue-300 hover:bg-blue-500/30`}
+                    >
+                      Iniciar
+                    </button>
+                    <button
+                      onClick={() => {
+                        const retorno = window.prompt('Retorno para o cliente (opcional):', s.resposta_admin || '');
+                        if (retorno !== null) atualizarStatusSolicitacao(s.id, 'concluida', retorno);
+                      }}
+                      className={`${btn} bg-green-500/20 text-green-300 hover:bg-green-500/30`}
+                    >
+                      Concluir
+                    </button>
+                    <button
+                      onClick={() => {
+                        const motivo = window.prompt('Motivo da rejeição (opcional):', s.resposta_admin || '');
+                        if (motivo !== null) atualizarStatusSolicitacao(s.id, 'rejeitada', motivo);
+                      }}
+                      className={`${btn} bg-red-500/20 text-red-300 hover:bg-red-500/30`}
+                    >
+                      Rejeitar
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (currentScreen) {
       case "home":
@@ -1698,6 +1850,8 @@ function RetaguardaDashboardContent() {
         return renderFormsScreen();
       case "map":
         return renderMapScreen();
+      case "requests":
+        return renderRequestsScreen();
       case "settings":
         return renderSettingsScreen();
       default:

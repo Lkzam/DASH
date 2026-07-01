@@ -6,6 +6,15 @@ import {
 } from 'recharts';
 import { useDarkMode } from '../contexts/DarkModeContext';
 import { Search, TrendingUp, Users, Award, MapPin, FileText, Filter } from 'lucide-react';
+import { supabase } from '../lib/supabaseClient';
+
+// Cabeçalho de autorização com o JWT da sessão Supabase (paywall server-side).
+async function authHeaders() {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token
+    ? { Authorization: `Bearer ${session.access_token}` }
+    : {};
+}
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 
@@ -87,7 +96,8 @@ const AnaliseEleitoral = () => {
 
     try {
       const res = await fetch(
-        `/api/electoral/municipios?uf=${estadoSelecionado}&cargo=${cargoSelecionado}`
+        `/api/electoral/municipios?uf=${estadoSelecionado}&cargo=${cargoSelecionado}`,
+        { headers: await authHeaders() }
       );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
@@ -129,7 +139,8 @@ const AnaliseEleitoral = () => {
 
     try {
       const res = await fetch(
-        `/api/electoral/candidatos?uf=${estadoSelecionado}&municipio=${encodeURIComponent(municipioObj.codigo)}&cargo=${cargoSelecionado}`
+        `/api/electoral/candidatos?uf=${estadoSelecionado}&municipio=${encodeURIComponent(municipioObj.codigo)}&cargo=${cargoSelecionado}`,
+        { headers: await authHeaders() }
       );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);

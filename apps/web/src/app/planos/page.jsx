@@ -14,28 +14,7 @@ import {
   Shield,
   Lock,
 } from 'lucide-react';
-
-const PLANS = {
-  mensal: {
-    id: 'mensal',
-    name: 'Plano Mensal',
-    price: 'R$ 99,00',
-    period: 'por mês',
-    items: ['Dashboard completo', 'Mapa eleitoral', 'Pesquisas ilimitadas', 'Suporte por e-mail'],
-  },
-  anual: {
-    id: 'anual',
-    name: 'Plano Anual',
-    price: 'R$ 890,00',
-    period: 'por ano (25% de desconto)',
-    items: [
-      'Tudo do plano mensal',
-      'Histórico eleitoral completo',
-      'Relatórios exportáveis',
-      'Suporte prioritário',
-    ],
-  },
-};
+import { PLANOS, TIERS } from '../../config/planos.js';
 
 function formatCPF(value) {
   return value
@@ -59,7 +38,9 @@ export default function PlanosPage() {
   const [searchParams] = useSearchParams();
   const tipoParam = searchParams.get('tipo');
 
-  const [selectedPlan, setSelectedPlan] = useState(tipoParam === 'anual' ? 'anual' : 'mensal');
+  const [selectedPlan, setSelectedPlan] = useState(
+    TIERS.includes(tipoParam) ? tipoParam : 'basico'
+  );
   const [step, setStep] = useState(1); // 1 = escolher plano, 2 = dados pessoais
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -72,7 +53,7 @@ export default function PlanosPage() {
   });
 
   useEffect(() => {
-    if (tipoParam === 'anual' || tipoParam === 'mensal') {
+    if (TIERS.includes(tipoParam)) {
       setSelectedPlan(tipoParam);
     }
   }, [tipoParam]);
@@ -113,7 +94,7 @@ export default function PlanosPage() {
           email: form.email.trim().toLowerCase(),
           cpf: form.cpf,
           telefone: form.telefone,
-          plano: selectedPlan,
+          tier: selectedPlan,
         }),
       });
 
@@ -132,7 +113,7 @@ export default function PlanosPage() {
     }
   };
 
-  const plan = PLANS[selectedPlan];
+  const plan = PLANOS[selectedPlan];
 
   return (
     <div className="min-h-screen bg-[#FAFBFD] font-inter">
@@ -189,8 +170,8 @@ export default function PlanosPage() {
               Acesso completo à plataforma OpinAI
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto mb-8">
-              {Object.values(PLANS).map((p) => (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto mb-8">
+              {TIERS.map((tierId) => PLANOS[tierId]).map((p) => (
                 <button
                   key={p.id}
                   onClick={() => setSelectedPlan(p.id)}
@@ -202,8 +183,8 @@ export default function PlanosPage() {
                 >
                   <div className="flex items-start justify-between mb-4">
                     <div>
-                      <h3 className="font-bold text-[#2A2E45] text-lg">{p.name}</h3>
-                      <p className="text-[#8A8FA6] text-sm">{p.period}</p>
+                      <h3 className="font-bold text-[#2A2E45] text-lg">{p.nome}</h3>
+                      <p className="text-[#8A8FA6] text-sm">{p.periodo}</p>
                     </div>
                     <div
                       className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
@@ -215,9 +196,9 @@ export default function PlanosPage() {
                       )}
                     </div>
                   </div>
-                  <div className="text-2xl font-bold text-[#2A2E45] mb-4">{p.price}</div>
+                  <div className="text-2xl font-bold text-[#2A2E45] mb-4">{p.precoLabel}</div>
                   <ul className="space-y-2">
-                    {p.items.map((item) => (
+                    {p.itens.map((item) => (
                       <li key={item} className="flex items-center gap-2 text-sm text-[#6F7689]">
                         <CheckCircle className="w-4 h-4 text-[#10B981] flex-shrink-0" />
                         {item}
@@ -233,7 +214,7 @@ export default function PlanosPage() {
                 onClick={() => setStep(2)}
                 className="bg-[#1570FF] text-white px-10 py-4 rounded-xl font-semibold text-lg hover:bg-[#0D4FB8] transition-colors"
               >
-                Continuar com {plan.name}
+                Continuar com {plan.nome}
               </button>
             </div>
           </div>
@@ -373,13 +354,13 @@ export default function PlanosPage() {
                 <h3 className="font-semibold text-[#2A2E45] mb-4">Resumo do pedido</h3>
 
                 <div className="bg-[#EDF3FF] rounded-xl p-4 mb-4">
-                  <div className="font-bold text-[#2A2E45]">{plan.name}</div>
-                  <div className="text-[#8A8FA6] text-sm">{plan.period}</div>
-                  <div className="text-2xl font-bold text-[#1570FF] mt-2">{plan.price}</div>
+                  <div className="font-bold text-[#2A2E45]">{plan.nome}</div>
+                  <div className="text-[#8A8FA6] text-sm">{plan.periodo}</div>
+                  <div className="text-2xl font-bold text-[#1570FF] mt-2">{plan.precoLabel}</div>
                 </div>
 
                 <ul className="space-y-2 mb-6">
-                  {plan.items.map((item) => (
+                  {plan.itens.map((item) => (
                     <li key={item} className="flex items-center gap-2 text-sm text-[#6F7689]">
                       <CheckCircle className="w-4 h-4 text-[#10B981] flex-shrink-0" />
                       {item}
@@ -390,11 +371,11 @@ export default function PlanosPage() {
                 <div className="border-t border-[#E4E9F2] pt-4">
                   <div className="flex justify-between text-sm mb-1">
                     <span className="text-[#8A8FA6]">Subtotal</span>
-                    <span className="text-[#2A2E45]">{plan.price}</span>
+                    <span className="text-[#2A2E45]">{plan.precoLabel}</span>
                   </div>
                   <div className="flex justify-between font-bold">
                     <span className="text-[#2A2E45]">Total</span>
-                    <span className="text-[#1570FF]">{plan.price}</span>
+                    <span className="text-[#1570FF]">{plan.precoLabel}</span>
                   </div>
                 </div>
 

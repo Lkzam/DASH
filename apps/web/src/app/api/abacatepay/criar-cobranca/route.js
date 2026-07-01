@@ -1,42 +1,28 @@
 import { createClient } from '@supabase/supabase-js';
-
-const PLANOS_CONFIG = {
-  mensal: {
-    externalId: 'plano-mensal-opinai',
-    name: 'Plano Mensal OpinAI',
-    description: 'Acesso completo à plataforma OpinAI por 1 mês',
-    price: 9900, // R$ 99,00 em centavos
-    duracaoDias: 30,
-  },
-  anual: {
-    externalId: 'plano-anual-opinai',
-    name: 'Plano Anual OpinAI',
-    description: 'Acesso completo à plataforma OpinAI por 12 meses',
-    price: 89000, // R$ 890,00 em centavos
-    duracaoDias: 365,
-  },
-};
+import { PLANOS, TIER_IDS } from '../../../../config/planos.js';
 
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { nome, email, cpf, telefone, plano } = body;
+    // `tier` é o novo campo; `plano` mantido por compatibilidade de payload.
+    const { nome, email, cpf, telefone } = body;
+    const tier = body.tier || body.plano;
 
     // Validação básica
-    if (!nome || !email || !cpf || !plano) {
+    if (!nome || !email || !cpf || !tier) {
       return new Response(
-        JSON.stringify({ error: 'Campos obrigatórios faltando: nome, email, cpf, plano' }),
+        JSON.stringify({ error: 'Campos obrigatórios faltando: nome, email, cpf, tier' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } },
       );
     }
 
-    const planConfig = PLANOS_CONFIG[plano];
-    if (!planConfig) {
+    if (!TIER_IDS.includes(tier)) {
       return new Response(
-        JSON.stringify({ error: 'Plano inválido. Use "mensal" ou "anual"' }),
+        JSON.stringify({ error: 'Plano inválido. Use "basico", "medio" ou "maximo".' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } },
       );
     }
+    const planConfig = PLANOS[tier];
 
     const ABACATEPAY_API_KEY = process.env.ABACATEPAY_API_KEY;
     const APP_URL = process.env.APP_URL || 'http://localhost:4000';
@@ -50,8 +36,8 @@ export async function POST(request) {
     }
 
     // Limpar CPF e telefone
-    const cpfLimpo = cpf.replace(/\D/g, '');
-    const telefoneLimpo = telefone.replace(/\D/g, '');
+    const cpfLimpo = String(cpf).replace(/\D/g, '');
+    const telefoneLimpo = String(telefone ?? '').replace(/\D/g, '');
 
     // Criar cobrança na AbacatePay
     const abacateRes = await fetch('https://api.abacatepay.com/v1/billing/create', {
@@ -65,11 +51,11 @@ export async function POST(request) {
         methods: ['PIX', 'CREDIT_CARD'],
         products: [
           {
-            externalId: planConfig.externalId,
-            name: planConfig.name,
-            description: planConfig.description,
+            externalId: `plano-${tier}-opinai`,
+            name: `${planConfig.nome} OpinAI`,
+            description: planConfig.descricao,
             quantity: 1,
-            price: planConfig.price,
+            price: planConfig.preco,
           },
         ],
         customer: {
@@ -107,17 +93,19 @@ export async function POST(request) {
     }
 
     // Registrar cobrança pendente no Supabase (usa service role para bypassar RLS)
-    const SUPABASE_URL = process.env.SUPABASE_URL || 'https://tuedlrtbnlguhnudttac.supabase.co';
+    const SUPABASE_URL = process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (SUPABASE_SERVICE_KEY) {
+    if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
       const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
       const { error: dbError } = await supabaseAdmin.from('planos_usuario').upsert(
         {
           email: email.trim().toLowerCase(),
           status: 'pendente',
-          plano: plano,
+          tier: tier,
+          plano: tier, // compat: coluna antiga
+          pesquisas_cota: planConfig.cotaPesquisas,
           abacatepay_billing_id: billingId,
           updated_at: new Date().toISOString(),
         },
