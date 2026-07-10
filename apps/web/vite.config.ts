@@ -16,6 +16,12 @@ import { restartEnvFileChange } from './plugins/restartEnvFileChange';
 export default defineConfig({
   // Keep them available via import.meta.env.NEXT_PUBLIC_*
   envPrefix: 'NEXT_PUBLIC_',
+  // O servidor Hono usa top-level await (createHonoServer/registerRoutes).
+  // O alvo padrão do Vite (es2020/chrome87) não suporta TLA e quebra o build
+  // de produção. 'esnext' resolve (Node moderno + browsers atuais).
+  build: {
+    target: 'esnext',
+  },
   optimizeDeps: {
     // Explicitly include fast-glob, since it gets dynamically imported and we
     // don't want that to cause a re-bundle.

@@ -1227,7 +1227,13 @@ app.get('/api/electoral/candidatos', async (c) => {
 
 app.route(API_BASENAME, api);
 
-export default await createHonoServer({
+// IMPORTANTE: sem `await` aqui de propósito.
+// O server-build (app React Router) importa símbolos deste módulo, e este módulo
+// (via createHonoServer → importBuild) importa o server-build. Com `top-level await`
+// isso vira um deadlock circular de ESM (o servidor não sobe em produção). Exportar
+// a Promise sem await deixa este módulo terminar de avaliar; o listen acontece como
+// efeito colateral dentro do createHonoServer.
+export default createHonoServer({
   app,
   defaultLogger: false,
 });

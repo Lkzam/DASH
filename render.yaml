@@ -1,0 +1,38 @@
+# ============================================================
+# Render Blueprint — OpinAI (servidor Node + Hono SSR)
+# Deploy: https://render.com → New → Blueprint → conecta o repo Lkzam/DASH
+# Os segredos (sync:false) você preenche no painel do Render, NÃO aqui.
+# ============================================================
+services:
+  - type: web
+    name: opinai
+    runtime: node
+    rootDir: apps/web          # monorepo: o app fica em apps/web
+    plan: starter              # 'free' funciona p/ testes (dorme após inatividade);
+                               # 'starter' (~US$7/mês) evita cold start no webhook
+    buildCommand: npm install && npm run build
+    startCommand: npm start    # = node ./build/server/index.js
+    healthCheckPath: /
+    autoDeploy: true           # redeploy automático a cada push no GitHub
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # ---- Segredos: preencher no painel do Render (Environment) ----
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ABACATEPAY_API_KEY
+        sync: false
+      - key: ABACATEPAY_WEBHOOK_SECRET
+        sync: false
+      # APP_URL = URL pública final (seu domínio Hostinger, com https)
+      - key: APP_URL
+        sync: false
+      # CORS_ORIGINS = mesmo domínio (separe por vírgula se houver mais de um)
+      - key: CORS_ORIGINS
+        sync: false
