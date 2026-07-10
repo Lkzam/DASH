@@ -15,7 +15,7 @@ if (globalThis.fetch) {
 const routeModules = import.meta.glob('../src/app/api/**/route.js', { eager: true });
 
 // Deriva o path Hono a partir da chave do glob.
-// Ex.: '../src/app/api/abacatepay/webhook/route.js' -> '/abacatepay/webhook'
+// Ex.: '../src/app/api/asaas/webhook/route.js' -> '/asaas/webhook'
 function getHonoPathFromKey(key: string): string {
   const rel = key.replace('../src/app/api/', '').replace(/\/route\.js$/, '');
   if (!rel || rel === 'route.js') return '/';

@@ -38,7 +38,7 @@ OpinAI é uma plataforma de análise eleitoral que oferece:
 | Médio  | R$ 300,00   | Tudo do Básico + requisitar pesquisas (cota mensal) |
 | Máximo | R$ 1.500,00 | Tudo do Médio + pesquisas ilimitadas e prioridade |
 
-O pagamento é feito via PIX ou cartão de crédito através do sistema AbacatePay.
+O pagamento é feito via PIX, cartão de crédito ou boleto através do Asaas (assinatura mensal recorrente).
 Após o pagamento ser confirmado, o acesso é liberado automaticamente.
 Em caso de dúvidas sobre pagamento, peça ao usuário para verificar o e-mail de confirmação.
 

@@ -108,7 +108,7 @@ SOBRE O OPINAI:
 - Sistema de favoritos e saldo de moedas
 - Painel admin (Retaguarda) para gestores
 
-PLANOS (3 tiers, acesso por 30 dias, pagamento via PIX ou cartão):
+PLANOS (3 tiers, assinatura MENSAL recorrente via Asaas — PIX, cartão ou boleto):
 - Básico — R$150: ver todas as pesquisas + acesso ao banco de dados eleitoral.
 - Médio — R$300: tudo do Básico + poder requisitar pesquisas personalizadas (cota mensal).
 - Máximo — R$1.500: tudo do Médio + pesquisas ilimitadas e prioridade máxima.

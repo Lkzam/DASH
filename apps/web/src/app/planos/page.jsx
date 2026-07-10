@@ -86,7 +86,7 @@ export default function PlanosPage() {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/abacatepay/criar-cobranca', {
+      const res = await fetch('/api/asaas/criar-assinatura', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -104,7 +104,7 @@ export default function PlanosPage() {
         throw new Error(data.error || 'Erro ao gerar cobrança. Tente novamente.');
       }
 
-      // Redirecionar para a página de pagamento da AbacatePay
+      // Redirecionar para a página de pagamento do Asaas
       window.location.href = data.url;
     } catch (err) {
       setError(err.message);
@@ -343,7 +343,7 @@ export default function PlanosPage() {
 
                 <p className="text-center text-xs text-[#8A8FA6]">
                   <Shield className="w-3 h-3 inline mr-1" />
-                  Pagamento 100% seguro processado pela AbacatePay
+                  Pagamento 100% seguro processado pelo Asaas
                 </p>
               </form>
             </div>

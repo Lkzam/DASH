@@ -28,9 +28,14 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
-      - key: ABACATEPAY_API_KEY
+      # ---- Asaas (pagamento / assinaturas) ----
+      - key: ASAAS_API_KEY
         sync: false
-      - key: ABACATEPAY_WEBHOOK_SECRET
+      - key: ASAAS_WEBHOOK_TOKEN
+        sync: false
+      # Opcional: URL da API. Padrão = produção. Sandbox p/ testes:
+      # https://api-sandbox.asaas.com/v3
+      - key: ASAAS_API_URL
         sync: false
       # APP_URL = URL pública final (seu domínio Hostinger, com https)
       - key: APP_URL

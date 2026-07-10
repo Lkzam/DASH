@@ -42,7 +42,7 @@ Três planos, cada um com acesso por 30 dias:
 | Médio  | R$ 300,00  | Tudo do Básico + requisitar pesquisas personalizadas (cota mensal) |
 | Máximo | R$ 1.500,00| Tudo do Médio + pesquisas ilimitadas e prioridade máxima |
 
-O pagamento é feito via PIX ou cartão de crédito.
+O pagamento é feito via PIX, cartão de crédito ou boleto (assinatura mensal recorrente pelo Asaas).
 Após o pagamento ser confirmado, o acesso é liberado automaticamente em alguns minutos.
 
 ---
