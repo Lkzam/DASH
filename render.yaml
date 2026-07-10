@@ -8,8 +8,10 @@ services:
     name: opinai
     runtime: node
     rootDir: apps/web          # monorepo: o app fica em apps/web
-    plan: starter              # 'free' funciona p/ testes (dorme após inatividade);
-                               # 'starter' (~US$7/mês) evita cold start no webhook
+    plan: free                 # grátis, NÃO exige cartão (dorme após ~15min de
+                               # inatividade → cold start). Para produção com
+                               # vendas, troque para 'starter' (~US$7/mês) e o
+                               # Render pedirá o cartão só então.
     buildCommand: npm install && npm run build
     startCommand: npm start    # = node ./build/server/index.js
     healthCheckPath: /
