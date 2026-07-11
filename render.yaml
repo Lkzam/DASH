@@ -12,7 +12,9 @@ services:
                                # inatividade → cold start). Para produção com
                                # vendas, troque para 'starter' (~US$7/mês) e o
                                # Render pedirá o cartão só então.
-    buildCommand: npm install && npm run build
+    # --include=dev: NODE_ENV=production faz o npm pular devDependencies, mas o
+    # CLI de build (react-router/dev, vite) está lá. Forçamos a instalação delas.
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start    # = node ./build/server/index.js
     healthCheckPath: /
     autoDeploy: true           # redeploy automático a cada push no GitHub
