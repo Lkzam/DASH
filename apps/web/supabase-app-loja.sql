@@ -1,6 +1,11 @@
 -- ============================================================
 -- OpinAI — Preparação para o APP (moedas + loja de cupons)
 -- Rode no Supabase SQL Editor.
+--
+-- ATENÇÃO: existia uma tabela `cupons` antiga (formato legado, com
+-- 1 cupom de teste "15% iFood"). Este script a REMOVE e recria no
+-- formato novo usado pela tela Cupons da Retaguarda. O cupom de
+-- teste é perdido — recrie pela interface se quiser.
 -- ============================================================
 
 -- 1. Moedas que o usuário do app ganha ao responder cada formulário
@@ -8,8 +13,12 @@ ALTER TABLE formularios
   ADD COLUMN IF NOT EXISTS moedas_recompensa INTEGER NOT NULL DEFAULT 0
   CHECK (moedas_recompensa >= 0);
 
--- 2. Cupons da loja do app (criados pela Retaguarda)
-CREATE TABLE IF NOT EXISTS cupons (
+-- 2. Remove a tabela legada e dependências (resgates antigos, se houver)
+DROP TABLE IF EXISTS cupons_resgates;
+DROP TABLE IF EXISTS cupons CASCADE;
+
+-- 3. Cupons da loja do app (criados pela Retaguarda)
+CREATE TABLE cupons (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   titulo TEXT NOT NULL,                 -- ex: "R$ 20 OFF no iFood"
   descricao TEXT,
@@ -25,17 +34,17 @@ CREATE TABLE IF NOT EXISTS cupons (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_cupons_ativo ON cupons(ativo);
+CREATE INDEX idx_cupons_ativo ON cupons(ativo);
 
 -- RLS: nenhum acesso direto de anon/authenticated.
 -- Todo acesso passa pelo servidor Hono (service_role), inclusive o futuro app.
 ALTER TABLE cupons ENABLE ROW LEVEL SECURITY;
 
--- 3. Resgates de cupons pelo app
+-- 4. Resgates de cupons pelo app
 -- REGRA DE NEGÓCIO: cada CPF pode resgatar NO MÁXIMO 1 unidade de cada cupom
 -- (pode resgatar cupons diferentes, nunca 2x o mesmo). Garantida pela UNIQUE
 -- abaixo — o banco rejeita a segunda tentativa mesmo se o app tiver bug.
-CREATE TABLE IF NOT EXISTS cupons_resgates (
+CREATE TABLE cupons_resgates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   cupom_id UUID NOT NULL REFERENCES cupons(id) ON DELETE CASCADE,
   cpf_hash TEXT NOT NULL,          -- hash SHA-256 do CPF (LGPD: não guardamos o CPF puro)
@@ -45,7 +54,7 @@ CREATE TABLE IF NOT EXISTS cupons_resgates (
   CONSTRAINT uq_resgate_por_cpf UNIQUE (cupom_id, cpf_hash)
 );
 
-CREATE INDEX IF NOT EXISTS idx_resgates_cpf ON cupons_resgates(cpf_hash);
+CREATE INDEX idx_resgates_cpf ON cupons_resgates(cpf_hash);
 
 ALTER TABLE cupons_resgates ENABLE ROW LEVEL SECURITY;
 
