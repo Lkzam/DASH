@@ -39,6 +39,10 @@ services:
       # https://api-sandbox.asaas.com/v3
       - key: ASAAS_API_URL
         sync: false
+      # Pepper do hash de CPF (API pública do app). NUNCA alterar depois
+      # que houver dados — invalidaria todos os hashes já gravados.
+      - key: CPF_PEPPER
+        sync: false
       # APP_URL = URL pública final (seu domínio Hostinger, com https)
       - key: APP_URL
         sync: false

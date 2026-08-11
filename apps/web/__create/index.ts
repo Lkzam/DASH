@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import nodeConsole from 'node:console';
+import { createHash, randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
 import { contextStorage } from 'hono/context-storage';
 import { cors } from 'hono/cors';
@@ -71,6 +72,8 @@ app.use('/api/retaguarda/chat', rateLimit({ windowMs: 60_000, max: 20 }));
 app.use('/api/check-plan', rateLimit({ windowMs: 60_000, max: 40 }));
 app.use('/api/check-retaguarda', rateLimit({ windowMs: 60_000, max: 40 }));
 app.use('/api/user/data', rateLimit({ windowMs: 60_000, max: 80 }));
+// API pública do aplicativo (sem login): limite mais apertado por IP.
+app.use('/api/app/*', rateLimit({ windowMs: 60_000, max: 30 }));
 
 // Não vaza detalhes internos (stack/serializeError) para o cliente.
 app.onError((err, c) => {
@@ -822,6 +825,264 @@ app.post('/api/retaguarda/cupons', async (c) => {
   return c.json({ error: 'Ação desconhecida' }, 400);
 });
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ═════════════════════════════════════════════════════════════════════════════
+// API PÚBLICA DO APLICATIVO (coleta de pesquisas por CPF, sem login)
+// Identificação por CPF com hash SHA-256 + pepper (LGPD: CPF puro nunca é
+// gravado). Regras garantidas também por UNIQUE no banco:
+//   - 1 resposta por CPF por pesquisa (app_respostas)
+//   - 1 resgate por CPF por cupom (cupons_resgates)
+// ═════════════════════════════════════════════════════════════════════════════
+
+function normalizarCpf(raw: unknown): string {
+  return String(raw ?? '').replace(/\D/g, '');
+}
+
+// Validação completa de CPF (dígitos verificadores)
+function cpfValido(cpf: string): boolean {
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+  for (const pos of [9, 10]) {
+    let soma = 0;
+    for (let i = 0; i < pos; i++) soma += parseInt(cpf[i], 10) * (pos + 1 - i);
+    const dig = ((soma * 10) % 11) % 10;
+    if (dig !== parseInt(cpf[pos], 10)) return false;
+  }
+  return true;
+}
+
+function hashCpf(cpf: string): string {
+  const pepper = process.env.CPF_PEPPER || '';
+  return createHash('sha256').update(`${cpf}${pepper}`).digest('hex');
+}
+
+// Valida e converte o CPF do body; retorna null se inválido
+function cpfDoBody(body: any): string | null {
+  const cpf = normalizarCpf(body?.cpf);
+  return cpfValido(cpf) ? hashCpf(cpf) : null;
+}
+
+// ── App: listar pesquisas ativas (+ flag de já respondida se CPF vier) ───────
+app.post('/api/app/pesquisas', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Accept: 'application/json' };
+
+  const body = await c.req.json().catch(() => ({}));
+  const { action, formularioId } = body;
+
+  // Perguntas de uma pesquisa específica
+  if (action === 'perguntas') {
+    if (!formularioId) return c.json({ error: 'formularioId obrigatório' }, 400);
+    const res = await fetch(
+      `${supaUrl}/rest/v1/perguntas_formulario?formulario_id=eq.${encodeURIComponent(String(formularioId))}&select=id,ordem,texto,tipo,obrigatoria,opcoes&order=ordem.asc`,
+      { headers: hdrs }
+    );
+    if (!res.ok) return c.json({ error: 'Erro ao buscar perguntas' }, 500);
+    return c.json(await res.json());
+  }
+
+  // Lista de pesquisas ativas (default)
+  const res = await fetch(
+    `${supaUrl}/rest/v1/formularios?ativo=eq.true&select=id,titulo,descricao,moedas_recompensa,created_at&order=created_at.desc`,
+    { headers: hdrs }
+  );
+  if (!res.ok) return c.json({ error: 'Erro ao buscar pesquisas' }, 500);
+  const formularios: any[] = await res.json();
+
+  // Se veio CPF válido, marca quais já foram respondidas por ele
+  const cpfHash = body.cpf ? cpfDoBody(body) : null;
+  if (cpfHash) {
+    const respRes = await fetch(
+      `${supaUrl}/rest/v1/app_respostas?cpf_hash=eq.${cpfHash}&select=formulario_id`,
+      { headers: hdrs }
+    );
+    const respondidas = new Set(
+      (respRes.ok ? await respRes.json() : []).map((r: any) => r.formulario_id)
+    );
+    return c.json(formularios.map(f => ({ ...f, ja_respondeu: respondidas.has(f.id) })));
+  }
+
+  return c.json(formularios);
+});
+
+// ── App: responder pesquisa (1x por CPF) e ganhar moedas ─────────────────────
+app.post('/api/app/responder', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, 'Content-Type': 'application/json', Accept: 'application/json' };
+
+  const body = await c.req.json().catch(() => ({}));
+  const { formularioId, respostas } = body;
+
+  const cpfHash = cpfDoBody(body);
+  if (!cpfHash) return c.json({ error: 'CPF inválido' }, 400);
+  if (!formularioId) return c.json({ error: 'formularioId obrigatório' }, 400);
+  if (!Array.isArray(respostas) || respostas.length === 0)
+    return c.json({ error: 'Envie as respostas da pesquisa' }, 400);
+
+  // Pesquisa precisa existir e estar ativa
+  const formRes = await fetch(
+    `${supaUrl}/rest/v1/formularios?id=eq.${encodeURIComponent(String(formularioId))}&ativo=eq.true&select=id,moedas_recompensa&limit=1`,
+    { headers: hdrs }
+  );
+  const forms: any[] = formRes.ok ? await formRes.json() : [];
+  if (forms.length === 0) return c.json({ error: 'Pesquisa não encontrada ou encerrada' }, 404);
+  const moedas = forms[0].moedas_recompensa ?? 0;
+
+  const insRes = await fetch(`${supaUrl}/rest/v1/app_respostas`, {
+    method: 'POST',
+    headers: hdrs,
+    body: JSON.stringify({
+      formulario_id: formularioId,
+      cpf_hash: cpfHash,
+      respostas,
+      moedas_ganhas: moedas,
+    }),
+  });
+
+  if (insRes.status === 409) {
+    return c.json({ error: 'Este CPF já respondeu esta pesquisa' }, 409);
+  }
+  if (!insRes.ok) {
+    console.error('[app/responder]', await insRes.text());
+    return c.json({ error: 'Erro ao registrar resposta' }, 500);
+  }
+
+  return c.json({ ok: true, moedas_ganhas: moedas });
+});
+
+// ── App: saldo de moedas do CPF ──────────────────────────────────────────────
+async function calcularSaldo(supaUrl: string, hdrs: any, cpfHash: string) {
+  const [ganhosRes, gastosRes] = await Promise.all([
+    fetch(`${supaUrl}/rest/v1/app_respostas?cpf_hash=eq.${cpfHash}&select=moedas_ganhas`, { headers: hdrs }),
+    fetch(`${supaUrl}/rest/v1/cupons_resgates?cpf_hash=eq.${cpfHash}&select=moedas_pagas`, { headers: hdrs }),
+  ]);
+  const ganhos: any[] = ganhosRes.ok ? await ganhosRes.json() : [];
+  const gastos: any[] = gastosRes.ok ? await gastosRes.json() : [];
+  const totalGanho = ganhos.reduce((s, r) => s + (r.moedas_ganhas || 0), 0);
+  const totalGasto = gastos.reduce((s, r) => s + (r.moedas_pagas || 0), 0);
+  return {
+    saldo: totalGanho - totalGasto,
+    total_ganho: totalGanho,
+    total_gasto: totalGasto,
+    pesquisas_respondidas: ganhos.length,
+    cupons_resgatados: gastos.length,
+  };
+}
+
+app.post('/api/app/saldo', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Accept: 'application/json' };
+
+  const body = await c.req.json().catch(() => ({}));
+  const cpfHash = cpfDoBody(body);
+  if (!cpfHash) return c.json({ error: 'CPF inválido' }, 400);
+
+  return c.json(await calcularSaldo(supaUrl, hdrs, cpfHash));
+});
+
+// ── App: loja de cupons (ativos, com estoque e dentro da validade) ───────────
+app.post('/api/app/loja', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Accept: 'application/json' };
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  const res = await fetch(
+    `${supaUrl}/rest/v1/cupons?ativo=eq.true&or=(validade.is.null,validade.gte.${hoje})` +
+    `&select=id,titulo,descricao,parceiro,custo_moedas,quantidade,resgatados,validade&order=custo_moedas.asc`,
+    { headers: hdrs }
+  );
+  if (!res.ok) return c.json({ error: 'Erro ao buscar cupons' }, 500);
+  const cupons: any[] = await res.json();
+
+  const disponiveis = cupons
+    .filter(cp => (cp.quantidade - (cp.resgatados || 0)) > 0)
+    .map(({ quantidade, resgatados, ...cp }) => ({
+      ...cp,
+      estoque_disponivel: quantidade - (resgatados || 0),
+    }));
+
+  // Se veio CPF válido, marca quais este CPF já resgatou
+  const body = await c.req.json().catch(() => ({}));
+  const cpfHash = body.cpf ? cpfDoBody(body) : null;
+  if (cpfHash) {
+    const rRes = await fetch(
+      `${supaUrl}/rest/v1/cupons_resgates?cpf_hash=eq.${cpfHash}&select=cupom_id`,
+      { headers: hdrs }
+    );
+    const resgatados = new Set((rRes.ok ? await rRes.json() : []).map((r: any) => r.cupom_id));
+    return c.json(disponiveis.map(cp => ({ ...cp, ja_resgatado: resgatados.has(cp.id) })));
+  }
+
+  return c.json(disponiveis);
+});
+
+// ── App: resgatar cupom (1x por CPF por cupom) ───────────────────────────────
+app.post('/api/app/resgatar', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, 'Content-Type': 'application/json', Accept: 'application/json' };
+
+  const body = await c.req.json().catch(() => ({}));
+  const { cupomId } = body;
+  const cpfHash = cpfDoBody(body);
+  if (!cpfHash) return c.json({ error: 'CPF inválido' }, 400);
+  if (!cupomId) return c.json({ error: 'cupomId obrigatório' }, 400);
+
+  // Cupom precisa estar ativo, com estoque e dentro da validade
+  const hoje = new Date().toISOString().slice(0, 10);
+  const cupomRes = await fetch(
+    `${supaUrl}/rest/v1/cupons?id=eq.${encodeURIComponent(String(cupomId))}&ativo=eq.true&or=(validade.is.null,validade.gte.${hoje})&limit=1`,
+    { headers: hdrs }
+  );
+  const cupons: any[] = cupomRes.ok ? await cupomRes.json() : [];
+  if (cupons.length === 0) return c.json({ error: 'Cupom não encontrado ou indisponível' }, 404);
+  const cupom = cupons[0];
+
+  if ((cupom.quantidade - (cupom.resgatados || 0)) <= 0)
+    return c.json({ error: 'Cupom esgotado' }, 409);
+
+  // Saldo suficiente?
+  const { saldo } = await calcularSaldo(supaUrl, hdrs, cpfHash);
+  if (saldo < cupom.custo_moedas)
+    return c.json({ error: `Saldo insuficiente (você tem ${saldo}, precisa de ${cupom.custo_moedas})` }, 402);
+
+  // Registra o resgate — a UNIQUE (cupom_id, cpf_hash) barra duplicata
+  const codigo = `OPINAI-${randomBytes(4).toString('hex').toUpperCase()}`;
+  const insRes = await fetch(`${supaUrl}/rest/v1/cupons_resgates`, {
+    method: 'POST',
+    headers: hdrs,
+    body: JSON.stringify({
+      cupom_id: cupomId,
+      cpf_hash: cpfHash,
+      moedas_pagas: cupom.custo_moedas,
+      codigo_entregue: codigo,
+    }),
+  });
+
+  if (insRes.status === 409) {
+    return c.json({ error: 'Este CPF já resgatou este cupom' }, 409);
+  }
+  if (!insRes.ok) {
+    console.error('[app/resgatar]', await insRes.text());
+    return c.json({ error: 'Erro ao resgatar cupom' }, 500);
+  }
+
+  // Atualização otimista do contador de resgatados: só aplica se o valor não
+  // mudou desde a leitura (evita corrida simples entre dois resgates).
+  await fetch(
+    `${supaUrl}/rest/v1/cupons?id=eq.${encodeURIComponent(String(cupomId))}&resgatados=eq.${cupom.resgatados || 0}`,
+    {
+      method: 'PATCH', headers: hdrs,
+      body: JSON.stringify({ resgatados: (cupom.resgatados || 0) + 1 }),
+    }
+  );
+
+  return c.json({ ok: true, codigo, moedas_pagas: cupom.custo_moedas });
+});
+// ═════════════════════════════════════════════════════════════════════════════
 
 // ── Retaguarda: listagem de usuários + permissões ────────────────────────────
 app.get('/api/retaguarda/users', async (c) => {
