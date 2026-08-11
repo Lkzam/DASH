@@ -1044,6 +1044,16 @@ app.post('/api/app/resgatar', async (c) => {
   if ((cupom.quantidade - (cupom.resgatados || 0)) <= 0)
     return c.json({ error: 'Cupom esgotado' }, 409);
 
+  // Já resgatou este cupom? Checado antes do saldo para a mensagem ficar
+  // correta (o resgate anterior já debitou moedas e mascararia o motivo real).
+  // A UNIQUE no banco continua sendo a garantia final contra corridas.
+  const jaRes = await fetch(
+    `${supaUrl}/rest/v1/cupons_resgates?cupom_id=eq.${encodeURIComponent(String(cupomId))}&cpf_hash=eq.${cpfHash}&select=id&limit=1`,
+    { headers: hdrs }
+  );
+  const ja: any[] = jaRes.ok ? await jaRes.json() : [];
+  if (ja.length > 0) return c.json({ error: 'Este CPF já resgatou este cupom' }, 409);
+
   // Saldo suficiente?
   const { saldo } = await calcularSaldo(supaUrl, hdrs, cpfHash);
   if (saldo < cupom.custo_moedas)
