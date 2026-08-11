@@ -627,6 +627,8 @@ app.post('/api/retaguarda/forms', async (c) => {
 
   const body = await c.req.json();
   const { action, formId, titulo, descricao, perguntas, ativo } = body;
+  // Moedas que o app pagará por resposta (>= 0; campo opcional p/ retrocompat.)
+  const moedasRecompensa = Math.max(0, parseInt(body.moedasRecompensa, 10) || 0);
   const now = new Date().toISOString();
 
   const buildPerguntas = (fId: string) =>
@@ -656,7 +658,7 @@ app.post('/api/retaguarda/forms', async (c) => {
     const fRes = await fetch(`${supaUrl}/rest/v1/formularios?select=*`, {
       method: 'POST',
       headers: { ...hdrs, Prefer: 'return=representation' },
-      body: JSON.stringify({ titulo, descricao, criado_por: userId, ativo: true }),
+      body: JSON.stringify({ titulo, descricao, criado_por: userId, ativo: true, moedas_recompensa: moedasRecompensa }),
     });
     if (!fRes.ok) return c.json({ error: await fRes.text() }, 500);
     const [formData] = await fRes.json();
@@ -674,7 +676,7 @@ app.post('/api/retaguarda/forms', async (c) => {
   if (action === 'update') {
     const fRes = await fetch(`${supaUrl}/rest/v1/formularios?id=eq.${formId}`, {
       method: 'PATCH', headers: hdrs,
-      body: JSON.stringify({ titulo, descricao, updated_at: now }),
+      body: JSON.stringify({ titulo, descricao, moedas_recompensa: moedasRecompensa, updated_at: now }),
     });
     if (!fRes.ok) return c.json({ error: await fRes.text() }, 500);
 
@@ -724,6 +726,94 @@ app.post('/api/retaguarda/forms', async (c) => {
         respondido_por: userId,
         respostas: typeof respostas === 'string' ? respostas : JSON.stringify(respostas),
       }),
+    });
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json({ ok: true });
+  }
+
+  return c.json({ error: 'Ação desconhecida' }, 400);
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Retaguarda: CRUD de cupons da loja do app ────────────────────────────────
+app.post('/api/retaguarda/cupons', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, 'Content-Type': 'application/json', Accept: 'application/json' };
+
+  const auth = await verificarRetaguarda(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+
+  const body = await c.req.json();
+  const { action, id } = body;
+
+  if (action === 'list') {
+    const res = await fetch(`${supaUrl}/rest/v1/cupons?select=*&order=created_at.desc`, { headers: hdrs });
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json(await res.json());
+  }
+
+  // Campos validados uma vez, usados em create e update
+  const PARCEIROS = ['ifood', 'uber', '99', 'outro'];
+  const montarCampos = () => {
+    const titulo = String(body.titulo ?? '').trim();
+    const custo = parseInt(body.custoMoedas, 10);
+    const quantidade = Math.max(0, parseInt(body.quantidade, 10) || 0);
+    const parceiro = PARCEIROS.includes(body.parceiro) ? body.parceiro : 'outro';
+    if (!titulo) return { erro: 'Título é obrigatório' };
+    if (!Number.isFinite(custo) || custo <= 0) return { erro: 'Custo em moedas deve ser maior que zero' };
+    return {
+      campos: {
+        titulo,
+        descricao: String(body.descricao ?? '').trim() || null,
+        parceiro,
+        custo_moedas: custo,
+        quantidade,
+        validade: body.validade || null,
+        updated_at: new Date().toISOString(),
+      },
+    };
+  };
+
+  if (action === 'create') {
+    const r = montarCampos();
+    if (r.erro) return c.json({ error: r.erro }, 400);
+    const res = await fetch(`${supaUrl}/rest/v1/cupons?select=*`, {
+      method: 'POST',
+      headers: { ...hdrs, Prefer: 'return=representation' },
+      body: JSON.stringify({ ...r.campos, ativo: true, criado_por: auth.userId }),
+    });
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    const [cupom] = await res.json();
+    return c.json({ cupom });
+  }
+
+  if (action === 'update') {
+    if (!id) return c.json({ error: 'id obrigatório' }, 400);
+    const r = montarCampos();
+    if (r.erro) return c.json({ error: r.erro }, 400);
+    const res = await fetch(`${supaUrl}/rest/v1/cupons?id=eq.${encodeURIComponent(String(id))}`, {
+      method: 'PATCH', headers: hdrs, body: JSON.stringify(r.campos),
+    });
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json({ ok: true });
+  }
+
+  // Ativa/desativa sem mexer nos demais campos (some/aparece na loja do app)
+  if (action === 'toggle_ativo') {
+    if (!id) return c.json({ error: 'id obrigatório' }, 400);
+    const res = await fetch(`${supaUrl}/rest/v1/cupons?id=eq.${encodeURIComponent(String(id))}`, {
+      method: 'PATCH', headers: hdrs,
+      body: JSON.stringify({ ativo: !!body.ativo, updated_at: new Date().toISOString() }),
+    });
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json({ ok: true });
+  }
+
+  if (action === 'delete') {
+    if (!id) return c.json({ error: 'id obrigatório' }, 400);
+    const res = await fetch(`${supaUrl}/rest/v1/cupons?id=eq.${encodeURIComponent(String(id))}`, {
+      method: 'DELETE', headers: hdrs,
     });
     if (!res.ok) return c.json({ error: await res.text() }, 500);
     return c.json({ ok: true });

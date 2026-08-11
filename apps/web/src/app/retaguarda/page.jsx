@@ -18,6 +18,8 @@ import {
   X,
   ArrowLeft,
   Inbox,
+  Ticket,
+  Coins,
 } from "lucide-react";
 import { useDarkMode } from "../../contexts/DarkModeContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -51,8 +53,18 @@ function RetaguardaDashboardContent() {
   // Estados para criar/editar form
   const [formTitle, setFormTitle] = useState("");
   const [formDescription, setFormDescription] = useState("");
+  const [formMoedas, setFormMoedas] = useState(0);
   const [perguntas, setPerguntas] = useState([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
+
+  // Estados para cupons da loja do app
+  const [cupons, setCupons] = useState([]);
+  const [loadingCupons, setLoadingCupons] = useState(false);
+  const [editingCupom, setEditingCupom] = useState(null); // null = fechado, {} = novo
+  const [cupomForm, setCupomForm] = useState({
+    titulo: '', descricao: '', parceiro: 'ifood',
+    custoMoedas: '', quantidade: '', validade: '',
+  });
 
   // Estados para responder formulários
   const [formulariosParaResponder, setFormulariosParaResponder] = useState([]);
@@ -293,6 +305,111 @@ function RetaguardaDashboardContent() {
     }
   };
 
+  // ── Cupons da loja do app ─────────────────────────────────────────────────
+  const carregarCupons = async () => {
+    setLoadingCupons(true);
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/cupons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'list' }),
+      });
+      setCupons(res.ok ? await res.json() : []);
+    } catch (err) {
+      console.error('[cupons] erro:', err);
+    } finally {
+      setLoadingCupons(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentScreen === 'cupons') carregarCupons();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentScreen]);
+
+  const abrirEditorCupom = (cupom = null) => {
+    setEditingCupom(cupom ?? {});
+    setCupomForm(cupom ? {
+      titulo: cupom.titulo || '',
+      descricao: cupom.descricao || '',
+      parceiro: cupom.parceiro || 'ifood',
+      custoMoedas: String(cupom.custo_moedas ?? ''),
+      quantidade: String(cupom.quantidade ?? ''),
+      validade: cupom.validade || '',
+    } : { titulo: '', descricao: '', parceiro: 'ifood', custoMoedas: '', quantidade: '', validade: '' });
+  };
+
+  const salvarCupom = async () => {
+    if (!cupomForm.titulo.trim()) {
+      showMessage('error', 'O título do cupom é obrigatório');
+      return;
+    }
+    if (!parseInt(cupomForm.custoMoedas, 10) || parseInt(cupomForm.custoMoedas, 10) <= 0) {
+      showMessage('error', 'Informe o custo em moedas (maior que zero)');
+      return;
+    }
+    try {
+      const token = await getToken();
+      const isEdit = editingCupom?.id;
+      const res = await fetch('/api/retaguarda/cupons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          action: isEdit ? 'update' : 'create',
+          id: editingCupom?.id,
+          titulo: cupomForm.titulo,
+          descricao: cupomForm.descricao,
+          parceiro: cupomForm.parceiro,
+          custoMoedas: cupomForm.custoMoedas,
+          quantidade: cupomForm.quantidade,
+          validade: cupomForm.validade || null,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || 'Erro ao salvar cupom');
+      }
+      showMessage('success', isEdit ? 'Cupom atualizado!' : 'Cupom criado!');
+      setEditingCupom(null);
+      carregarCupons();
+    } catch (err) {
+      showMessage('error', err.message);
+    }
+  };
+
+  const alternarAtivoCupom = async (cupom) => {
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/cupons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'toggle_ativo', id: cupom.id, ativo: !cupom.ativo }),
+      });
+      if (!res.ok) throw new Error('Erro ao atualizar cupom');
+      carregarCupons();
+    } catch (err) {
+      showMessage('error', err.message);
+    }
+  };
+
+  const excluirCupom = async (cupomId) => {
+    if (!confirm('Excluir este cupom? Ele sairá da loja do app.')) return;
+    try {
+      const token = await getToken();
+      const res = await fetch('/api/retaguarda/cupons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'delete', id: cupomId }),
+      });
+      if (!res.ok) throw new Error('Erro ao excluir cupom');
+      showMessage('success', 'Cupom excluído!');
+      carregarCupons();
+    } catch (err) {
+      showMessage('error', err.message);
+    }
+  };
+
   const navItems = [
     {
       id: "home",
@@ -317,6 +434,12 @@ function RetaguardaDashboardContent() {
       icon: Inbox,
       label: "Solicitações",
       active: currentScreen === "requests",
+    },
+    {
+      id: "cupons",
+      icon: Ticket,
+      label: "Cupons",
+      active: currentScreen === "cupons",
     },
     {
       id: "settings",
@@ -364,6 +487,7 @@ function RetaguardaDashboardContent() {
     setEditingForm(null);
     setViewingForm(null);
     setRespondendoForm(null);
+    setEditingCupom(null);
   };
 
   const handleCreateForm = async () => {
@@ -399,6 +523,7 @@ function RetaguardaDashboardContent() {
             formId: editingForm.id,
             titulo: formTitle,
             descricao: formDescription,
+            moedasRecompensa: formMoedas,
             perguntas,
           }),
         });
@@ -413,6 +538,7 @@ function RetaguardaDashboardContent() {
             action: 'create',
             titulo: formTitle,
             descricao: formDescription,
+            moedasRecompensa: formMoedas,
             perguntas,
           }),
         });
@@ -424,6 +550,7 @@ function RetaguardaDashboardContent() {
       setEditingForm(null);
       setFormTitle('');
       setFormDescription('');
+      setFormMoedas(0);
       setPerguntas([]);
 
       // Recarregar lista
@@ -508,6 +635,7 @@ function RetaguardaDashboardContent() {
       setEditingForm(form);
       setFormTitle(form.titulo);
       setFormDescription(form.descricao || '');
+      setFormMoedas(form.moedas_recompensa ?? 0);
       setPerguntas(perguntasParseadas);
       setShowCreateForm(true);
     } catch (err) {
@@ -795,6 +923,7 @@ function RetaguardaDashboardContent() {
                 setEditingForm(null);
                 setFormTitle('');
                 setFormDescription('');
+                setFormMoedas(0);
                 setPerguntas([]);
               }}
               className={`px-4 py-2 rounded-lg transition-colors ${
@@ -849,6 +978,30 @@ function RetaguardaDashboardContent() {
                     : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
                 }`}
               />
+            </div>
+
+            <div>
+              <label className={`flex items-center gap-2 text-sm font-medium mb-2 ${
+                isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'
+              }`}>
+                <Coins className="w-4 h-4 text-amber-400" />
+                Moedas por resposta (app)
+              </label>
+              <input
+                type="number"
+                min={0}
+                value={formMoedas}
+                onChange={(e) => setFormMoedas(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                placeholder="0"
+                className={`w-full sm:w-48 px-4 py-2 border rounded-lg outline-none ${
+                  isDarkMode
+                    ? 'bg-[#1A1D21] border-[#3A3E55] text-white'
+                    : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+                }`}
+              />
+              <p className={`text-xs mt-1 ${isDarkMode ? 'text-[#8A8FA6]' : 'text-[#8A8FA6]'}`}>
+                Quantas moedas o usuário do aplicativo ganha ao responder esta pesquisa. 0 = sem recompensa.
+              </p>
             </div>
           </div>
 
@@ -1026,6 +1179,7 @@ function RetaguardaDashboardContent() {
                 setEditingForm(null);
                 setFormTitle('');
                 setFormDescription('');
+                setFormMoedas(0);
                 setPerguntas([]);
               }}
               className={`px-6 py-3 rounded-lg transition-colors ${
@@ -1842,6 +1996,207 @@ function RetaguardaDashboardContent() {
     );
   };
 
+  const renderCuponsScreen = () => {
+    const card = isDarkMode ? 'bg-[#2A2E45] border-[#3A3E55]' : 'bg-white border-[#E4E9F2]';
+    const txt = isDarkMode ? 'text-white' : 'text-[#2A2E45]';
+    const sub = isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]';
+    const input = `w-full px-4 py-2 border rounded-lg outline-none ${
+      isDarkMode ? 'bg-[#1A1D21] border-[#3A3E55] text-white' : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+    }`;
+    const label = `block text-sm font-medium mb-2 ${isDarkMode ? 'text-[#B0B5C9]' : 'text-[#2A2E45]'}`;
+
+    const PARCEIRO_LABEL = { ifood: 'iFood', uber: 'Uber', '99': '99', outro: 'Outro' };
+
+    // ── Editor (criar/editar) ──
+    if (editingCupom !== null) {
+      return (
+        <div className="max-w-2xl mx-auto py-6 space-y-5">
+          <div className="flex items-center justify-between">
+            <h2 className={`text-2xl font-bold ${txt}`}>
+              {editingCupom.id ? 'Editar Cupom' : 'Novo Cupom'}
+            </h2>
+            <button
+              onClick={() => setEditingCupom(null)}
+              className={`px-4 py-2 rounded-lg transition-colors ${
+                isDarkMode ? 'bg-[#3A3E55] hover:bg-[#4A4E65] text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+              }`}
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className={`rounded-xl border p-6 space-y-4 ${card}`}>
+            <div>
+              <label className={label}>Título do cupom *</label>
+              <input
+                type="text"
+                value={cupomForm.titulo}
+                onChange={(e) => setCupomForm({ ...cupomForm, titulo: e.target.value })}
+                placeholder="Ex: R$ 20 OFF no iFood"
+                className={input}
+              />
+            </div>
+
+            <div>
+              <label className={label}>Descrição</label>
+              <textarea
+                rows={2}
+                value={cupomForm.descricao}
+                onChange={(e) => setCupomForm({ ...cupomForm, descricao: e.target.value })}
+                placeholder="Regras de uso, valor mínimo do pedido, etc."
+                className={`${input} resize-none`}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className={label}>Parceiro</label>
+                <select
+                  value={cupomForm.parceiro}
+                  onChange={(e) => setCupomForm({ ...cupomForm, parceiro: e.target.value })}
+                  className={input}
+                >
+                  <option value="ifood">iFood</option>
+                  <option value="uber">Uber</option>
+                  <option value="99">99</option>
+                  <option value="outro">Outro</option>
+                </select>
+              </div>
+              <div>
+                <label className={label}>Custo em moedas *</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={cupomForm.custoMoedas}
+                  onChange={(e) => setCupomForm({ ...cupomForm, custoMoedas: e.target.value })}
+                  placeholder="Ex: 500"
+                  className={input}
+                />
+              </div>
+              <div>
+                <label className={label}>Estoque (quantidade)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={cupomForm.quantidade}
+                  onChange={(e) => setCupomForm({ ...cupomForm, quantidade: e.target.value })}
+                  placeholder="Ex: 100"
+                  className={input}
+                />
+              </div>
+              <div>
+                <label className={label}>Validade (opcional)</label>
+                <input
+                  type="date"
+                  value={cupomForm.validade}
+                  onChange={(e) => setCupomForm({ ...cupomForm, validade: e.target.value })}
+                  className={input}
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={salvarCupom}
+              className="flex items-center gap-2 bg-[#1570FF] text-white px-6 py-2.5 rounded-lg hover:bg-[#0D4FB8] transition-colors font-medium"
+            >
+              <Save className="w-4 h-4" />
+              {editingCupom.id ? 'Salvar alterações' : 'Criar cupom'}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Listagem ──
+    return (
+      <div className="max-w-4xl mx-auto py-6">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className={`text-2xl font-bold ${txt}`}>Cupons da loja do app</h2>
+          <button
+            onClick={() => abrirEditorCupom()}
+            className="flex items-center gap-2 bg-[#1570FF] text-white px-4 py-2 rounded-lg hover:bg-[#0D4FB8] transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Novo cupom
+          </button>
+        </div>
+        <p className={`text-sm mb-5 ${sub}`}>
+          Estes cupons aparecem na loja do aplicativo, onde os usuários trocam moedas ganhas respondendo pesquisas.
+        </p>
+
+        {loadingCupons ? (
+          <p className={sub}>Carregando cupons...</p>
+        ) : cupons.length === 0 ? (
+          <div className={`rounded-xl border p-8 text-center ${card}`}>
+            <Ticket className={`w-10 h-10 mx-auto mb-3 ${sub}`} />
+            <p className={sub}>Nenhum cupom cadastrado ainda. Crie o primeiro!</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {cupons.map((cp) => (
+              <div key={cp.id} className={`rounded-xl border p-4 ${card} ${!cp.ativo ? 'opacity-60' : ''}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`font-semibold ${txt}`}>{cp.titulo}</p>
+                      <span className="text-xs font-medium px-2 py-0.5 rounded bg-[#1570FF]/20 text-[#5B9BFF]">
+                        {PARCEIRO_LABEL[cp.parceiro] || cp.parceiro}
+                      </span>
+                      {!cp.ativo && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded bg-gray-500/20 text-gray-400">
+                          Inativo
+                        </span>
+                      )}
+                    </div>
+                    {cp.descricao && <p className={`text-sm mt-1 ${sub}`}>{cp.descricao}</p>}
+                    <div className={`flex items-center gap-4 text-sm mt-2 ${sub}`}>
+                      <span className="flex items-center gap-1">
+                        <Coins className="w-4 h-4 text-amber-400" />
+                        <b className={txt}>{cp.custo_moedas}</b> moedas
+                      </span>
+                      <span>Estoque: <b className={txt}>{cp.quantidade - (cp.resgatados || 0)}</b> / {cp.quantidade}</span>
+                      {cp.validade && (
+                        <span>Válido até {new Date(cp.validade + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => abrirEditorCupom(cp)}
+                      className={`p-2 rounded-lg transition-colors ${
+                        isDarkMode ? 'hover:bg-[#3A3E55] text-[#B0B5C9]' : 'hover:bg-gray-100 text-gray-500'
+                      }`}
+                      title="Editar"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => alternarAtivoCupom(cp)}
+                      className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                        cp.ativo
+                          ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                          : 'bg-green-500/20 text-green-300 hover:bg-green-500/30'
+                      }`}
+                    >
+                      {cp.ativo ? 'Desativar' : 'Ativar'}
+                    </button>
+                    <button
+                      onClick={() => excluirCupom(cp.id)}
+                      className="p-2 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
+                      title="Excluir"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderContent = () => {
     switch (currentScreen) {
       case "home":
@@ -1852,6 +2207,8 @@ function RetaguardaDashboardContent() {
         return renderMapScreen();
       case "requests":
         return renderRequestsScreen();
+      case "cupons":
+        return renderCuponsScreen();
       case "settings":
         return renderSettingsScreen();
       default:
