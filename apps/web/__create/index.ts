@@ -359,15 +359,19 @@ app.post('/api/user/data', async (c) => {
     if (!formsRes.ok) return c.json({ error: await formsRes.text() }, 500);
     const formularios: any[] = await formsRes.json();
 
-    // Buscar todos os IDs de respostas em um único request
-    const allRespostasRes = await fetch(
-      `${supaUrl}/rest/v1/respostas_formulario?select=formulario_id`,
-      { headers: hdrs }
-    );
+    // As respostas vêm de DUAS origens e ambas contam:
+    //   respostas_formulario → quem respondeu pelo site (usuário logado)
+    //   app_respostas        → quem respondeu pelo aplicativo (identificado por CPF)
+    // Sem somar as duas, uma pesquisa respondida só pelo app aparece com 0.
+    const [allRespostasRes, allAppRes] = await Promise.all([
+      fetch(`${supaUrl}/rest/v1/respostas_formulario?select=formulario_id`, { headers: hdrs }),
+      fetch(`${supaUrl}/rest/v1/app_respostas?select=formulario_id`, { headers: hdrs }),
+    ]);
     const allRespostas: any[] = allRespostasRes.ok ? await allRespostasRes.json() : [];
+    const allApp: any[] = allAppRes.ok ? await allAppRes.json() : [];
 
     const countMap: Record<string, number> = {};
-    allRespostas.forEach((r: any) => {
+    [...allRespostas, ...allApp].forEach((r: any) => {
       countMap[r.formulario_id] = (countMap[r.formulario_id] ?? 0) + 1;
     });
 
@@ -414,18 +418,52 @@ app.post('/api/user/data', async (c) => {
       if (!userMap[uid as string]) userMap[uid as string] = `user_${(uid as string).slice(0, 8)}`;
     }
 
-    const respostasProcessadas = respostas.map((r: any) => {
-      let respostasArray: any[] = [];
+    const parseRespostas = (valor: any): any[] => {
       try {
-        respostasArray = typeof r.respostas === 'string'
-          ? JSON.parse(r.respostas)
-          : (r.respostas ?? []);
-      } catch { /* ignore */ }
+        return typeof valor === 'string' ? JSON.parse(valor) : (valor ?? []);
+      } catch {
+        return [];
+      }
+    };
+
+    const respostasProcessadas = respostas.map((r: any) => {
       const userLabel = userMap[r.respondido_por] ?? `user_${r.respondido_por.slice(0, 8)}`;
-      return { ...r, respostas_array: respostasArray, user_email: userLabel, user_name: userLabel };
+      return {
+        ...r,
+        respostas_array: parseRespostas(r.respostas),
+        user_email: userLabel,
+        user_name: userLabel,
+        origem: 'site',
+      };
     });
 
-    return c.json({ perguntas: perguntasParseadas, respostas: respostasProcessadas });
+    // Respostas vindas do APLICATIVO (mesma pesquisa, outra tabela). Quem
+    // responde pelo app não tem conta: a identidade é o CPF, do qual só
+    // guardamos o hash — por isso o rótulo usa um prefixo anônimo dele.
+    const appRes = await fetch(
+      `${supaUrl}/rest/v1/app_respostas?formulario_id=eq.${encodeURIComponent(String(formularioId))}`,
+      { headers: hdrs }
+    );
+    const respostasApp: any[] = appRes.ok ? await appRes.json() : [];
+
+    const appProcessadas = respostasApp.map((r: any) => {
+      const rotulo = `App · ${String(r.cpf_hash ?? '').slice(0, 8)}`;
+      return {
+        id: r.id,
+        formulario_id: r.formulario_id,
+        created_at: r.created_at,
+        respostas_array: parseRespostas(r.respostas),
+        user_email: rotulo,
+        user_name: rotulo,
+        origem: 'app',
+      };
+    });
+
+    const todas = [...respostasProcessadas, ...appProcessadas].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    return c.json({ perguntas: perguntasParseadas, respostas: todas });
   }
 
   // ── CPF ────────────────────────────────────────────────────
