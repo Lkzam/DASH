@@ -988,6 +988,39 @@ app.post('/api/app/loja', async (c) => {
   const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Accept: 'application/json' };
 
+  const body = await c.req.json().catch(() => ({}));
+
+  // Cupons que ESTE CPF já resgatou, com o código entregue. O código só
+  // aparecia uma vez (no alerta logo após o resgate) e se perdia ao fechar;
+  // aqui ele fica recuperável a qualquer momento.
+  if (body?.action === 'meus_resgates') {
+    const cpfHash = cpfDoBody(body);
+    if (!cpfHash) return c.json({ error: 'CPF inválido' }, 400);
+
+    const res = await fetch(
+      `${supaUrl}/rest/v1/cupons_resgates?cpf_hash=eq.${cpfHash}` +
+      `&select=id,codigo_entregue,moedas_pagas,created_at,cupons(id,titulo,descricao,parceiro)` +
+      `&order=created_at.desc`,
+      { headers: hdrs }
+    );
+    if (!res.ok) {
+      console.error('[app/loja:meus_resgates]', await res.text());
+      return c.json({ error: 'Erro ao buscar seus cupons' }, 500);
+    }
+    const linhas: any[] = await res.json();
+
+    // Achata o embed do PostgREST e tolera cupom apagado depois do resgate.
+    return c.json(linhas.map((r) => ({
+      id: r.id,
+      codigo: r.codigo_entregue,
+      moedas_pagas: r.moedas_pagas,
+      resgatado_em: r.created_at,
+      titulo: r.cupons?.titulo ?? 'Cupom removido',
+      descricao: r.cupons?.descricao ?? null,
+      parceiro: r.cupons?.parceiro ?? 'outro',
+    })));
+  }
+
   const hoje = new Date().toISOString().slice(0, 10);
   const res = await fetch(
     `${supaUrl}/rest/v1/cupons?ativo=eq.true&or=(validade.is.null,validade.gte.${hoje})` +
@@ -1005,7 +1038,6 @@ app.post('/api/app/loja', async (c) => {
     }));
 
   // Se veio CPF válido, marca quais este CPF já resgatou
-  const body = await c.req.json().catch(() => ({}));
   const cpfHash = body.cpf ? cpfDoBody(body) : null;
   if (cpfHash) {
     const rRes = await fetch(
