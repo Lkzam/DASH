@@ -477,29 +477,58 @@ app.post('/api/user/data', async (c) => {
   }
 
   if (action === 'update_cpf') {
-    const cpfDigits = String(cpf ?? '').replace(/\D/g, '');
-    if (cpfDigits.length !== 11) return c.json({ error: 'CPF deve ter exatamente 11 dígitos' }, 400);
+    const cpfDigits = normalizarCpf(cpf);
+    // Valida os dígitos verificadores, não só o tamanho: antes qualquer
+    // sequência de 11 dígitos passava, e o CPF é a identidade que liga esta
+    // conta aos dados do aplicativo.
+    if (!cpfValido(cpfDigits)) return c.json({ error: 'CPF inválido' }, 400);
 
     const existRes = await fetch(
-      `${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${userId}`,
+      `${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${userId}&select=cpf`,
       { headers: hdrs }
     );
     const existing: any[] = existRes.ok ? await existRes.json() : [];
 
-    if (existing.length > 0) {
-      await fetch(`${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${userId}`, {
-        method: 'PATCH',
-        headers: hdrs,
-        body: JSON.stringify({ cpf: cpfDigits, updated_at: new Date().toISOString() }),
-      });
-    } else {
-      await fetch(`${supaUrl}/rest/v1/perfil_usuario`, {
-        method: 'POST',
-        headers: hdrs,
-        body: JSON.stringify({ user_id: userId, cpf: cpfDigits }),
-      });
+    // Travado depois de definido — mesma regra do app: moedas, respostas e
+    // resgates ficam atrelados ao CPF, então trocar moveria saldo entre CPFs.
+    if (existing[0]?.cpf && existing[0].cpf !== cpfDigits) {
+      return c.json({ error: 'O CPF desta conta já foi definido e não pode ser alterado.' }, 409);
     }
-    return c.json({ ok: true });
+    if (existing[0]?.cpf === cpfDigits) return c.json({ ok: true, cpf: cpfDigits });
+
+    // Um CPF por conta (o índice único uq_perfil_cpf é a garantia final).
+    const usadoRes = await fetch(
+      `${supaUrl}/rest/v1/perfil_usuario?cpf=eq.${encodeURIComponent(cpfDigits)}&select=user_id&limit=1`,
+      { headers: hdrs }
+    );
+    const usado: any[] = usadoRes.ok ? await usadoRes.json() : [];
+    if (usado.length > 0 && usado[0].user_id !== userId) {
+      return c.json({ error: 'Este CPF já está vinculado a outra conta.' }, 409);
+    }
+
+    const agora = new Date().toISOString();
+    const gravaRes = existing.length > 0
+      ? await fetch(`${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${userId}`, {
+          method: 'PATCH', headers: hdrs,
+          body: JSON.stringify({ cpf: cpfDigits, cpf_definido_em: agora, updated_at: agora }),
+        })
+      : await fetch(`${supaUrl}/rest/v1/perfil_usuario`, {
+          method: 'POST', headers: hdrs,
+          body: JSON.stringify({ user_id: userId, cpf: cpfDigits, cpf_definido_em: agora }),
+        });
+
+    // Antes o resultado da gravação era ignorado e a resposta era sempre
+    // ok:true — a tela dizia "salvo" mesmo quando nada tinha sido gravado.
+    if (!gravaRes.ok) {
+      const detalhe = await gravaRes.text();
+      console.error('[user/data:update_cpf]', detalhe);
+      if (detalhe.includes('23505')) {
+        return c.json({ error: 'Este CPF já está vinculado a outra conta.' }, 409);
+      }
+      return c.json({ error: 'Não foi possível salvar o CPF.' }, 500);
+    }
+
+    return c.json({ ok: true, cpf: cpfDigits });
   }
 
   return c.json({ error: 'Ação desconhecida' }, 400);
@@ -893,17 +922,132 @@ function hashCpf(cpf: string): string {
   return createHash('sha256').update(`${cpf}${pepper}`).digest('hex');
 }
 
-// Valida e converte o CPF do body; retorna null se inválido
-function cpfDoBody(body: any): string | null {
-  const cpf = normalizarCpf(body?.cpf);
-  return cpfValido(cpf) ? hashCpf(cpf) : null;
+/**
+ * Autenticação das rotas do aplicativo.
+ *
+ * O app deixou de aceitar o CPF no corpo da requisição: ele vem do PERFIL da
+ * conta autenticada. Antes, qualquer um que soubesse o CPF alheio podia
+ * responder pesquisas e gastar as moedas daquela pessoa chamando a API direto.
+ *
+ * Note que NÃO há verificarPlano aqui: quem usa o app é o público que responde
+ * pesquisa por moedas, não um cliente pagante. Passar pelo paywall (como faz
+ * /api/user/data) barraria todo mundo com 402.
+ */
+async function autenticarApp(supaUrl: string, supaKey: string, authHeader: string) {
+  const base = await verificarUsuario(supaUrl, supaKey, authHeader);
+  if (!base.ok) return base;
+
+  const res = await fetch(
+    `${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${base.userId}&select=cpf,cpf_definido_em`,
+    { headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Accept: 'application/json' } }
+  );
+  const perfil: any[] = res.ok ? await res.json() : [];
+  const cpf = perfil[0]?.cpf ?? null;
+
+  // 428: conta válida, mas ainda sem CPF. O app usa isto para mandar o
+  // usuário à tela de identificação em vez de mostrar erro genérico.
+  if (!cpf) {
+    return { ok: false as const, status: 428, error: 'CPF ainda não definido', precisaCpf: true };
+  }
+
+  return {
+    ok: true as const,
+    userId: base.userId,
+    email: base.email,
+    cpf,
+    cpfHash: hashCpf(cpf),
+  };
 }
+
+// ── App: perfil da conta (CPF) ───────────────────────────────────────────────
+// Exige apenas login — NÃO exige plano. É por aqui que o app define o CPF,
+// e não por /api/user/data, que é gateado por plano pago.
+app.post('/api/app/perfil', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = {
+    apikey: supaKey, Authorization: `Bearer ${supaKey}`,
+    'Content-Type': 'application/json', Accept: 'application/json',
+  };
+
+  const auth = await verificarUsuario(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+
+  const body = await c.req.json().catch(() => ({}));
+  const action = body?.action ?? 'get';
+
+  const perfilRes = await fetch(
+    `${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${auth.userId}&select=cpf,cpf_definido_em`,
+    { headers: hdrs }
+  );
+  const perfil: any[] = perfilRes.ok ? await perfilRes.json() : [];
+  const atual = perfil[0] ?? null;
+
+  if (action === 'get') {
+    return c.json({
+      email: auth.email,
+      cpf: atual?.cpf ?? null,
+      definido_em: atual?.cpf_definido_em ?? null,
+    });
+  }
+
+  if (action === 'set') {
+    // Travado depois de definido: moedas, respostas e resgates ficam presos
+    // ao CPF, então trocar permitiria mover saldo e responder duas vezes.
+    if (atual?.cpf) {
+      return c.json({ error: 'O CPF desta conta já foi definido e não pode ser alterado.' }, 409);
+    }
+
+    const cpf = normalizarCpf(body?.cpf);
+    if (!cpfValido(cpf)) return c.json({ error: 'CPF inválido' }, 400);
+
+    // Um CPF por conta: dois cadastros do mesmo CPF gerariam o mesmo hash e
+    // compartilhariam saldo e respostas.
+    const usadoRes = await fetch(
+      `${supaUrl}/rest/v1/perfil_usuario?cpf=eq.${encodeURIComponent(cpf)}&select=user_id&limit=1`,
+      { headers: hdrs }
+    );
+    const usado: any[] = usadoRes.ok ? await usadoRes.json() : [];
+    if (usado.length > 0 && usado[0].user_id !== auth.userId) {
+      return c.json({ error: 'Este CPF já está vinculado a outra conta.' }, 409);
+    }
+
+    const agora = new Date().toISOString();
+    const gravaRes = atual
+      ? await fetch(`${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${auth.userId}`, {
+          method: 'PATCH', headers: hdrs,
+          body: JSON.stringify({ cpf, cpf_definido_em: agora, updated_at: agora }),
+        })
+      : await fetch(`${supaUrl}/rest/v1/perfil_usuario`, {
+          method: 'POST', headers: hdrs,
+          body: JSON.stringify({ user_id: auth.userId, cpf, cpf_definido_em: agora }),
+        });
+
+    if (!gravaRes.ok) {
+      const detalhe = await gravaRes.text();
+      console.error('[app/perfil:set]', detalhe);
+      // 23505 = unique_violation: alguém gravou o mesmo CPF entre a checagem
+      // acima e este INSERT. O índice único é a garantia final.
+      if (detalhe.includes('23505')) {
+        return c.json({ error: 'Este CPF já está vinculado a outra conta.' }, 409);
+      }
+      return c.json({ error: 'Não foi possível salvar o CPF.' }, 500);
+    }
+
+    return c.json({ ok: true, cpf, definido_em: agora });
+  }
+
+  return c.json({ error: 'Ação desconhecida' }, 400);
+});
 
 // ── App: listar pesquisas ativas (+ flag de já respondida se CPF vier) ───────
 app.post('/api/app/pesquisas', async (c) => {
   const supaUrl = process.env.SUPABASE_URL!;
   const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Accept: 'application/json' };
+
+  const auth = await autenticarApp(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error, precisa_cpf: auth.precisaCpf }, auth.status as any);
 
   const body = await c.req.json().catch(() => ({}));
   const { action, formularioId } = body;
@@ -927,20 +1071,14 @@ app.post('/api/app/pesquisas', async (c) => {
   if (!res.ok) return c.json({ error: 'Erro ao buscar pesquisas' }, 500);
   const formularios: any[] = await res.json();
 
-  // Se veio CPF válido, marca quais já foram respondidas por ele
-  const cpfHash = body.cpf ? cpfDoBody(body) : null;
-  if (cpfHash) {
-    const respRes = await fetch(
-      `${supaUrl}/rest/v1/app_respostas?cpf_hash=eq.${cpfHash}&select=formulario_id`,
-      { headers: hdrs }
-    );
-    const respondidas = new Set(
-      (respRes.ok ? await respRes.json() : []).map((r: any) => r.formulario_id)
-    );
-    return c.json(formularios.map(f => ({ ...f, ja_respondeu: respondidas.has(f.id) })));
-  }
-
-  return c.json(formularios);
+  const respRes = await fetch(
+    `${supaUrl}/rest/v1/app_respostas?cpf_hash=eq.${auth.cpfHash}&select=formulario_id`,
+    { headers: hdrs }
+  );
+  const respondidas = new Set(
+    (respRes.ok ? await respRes.json() : []).map((r: any) => r.formulario_id)
+  );
+  return c.json(formularios.map(f => ({ ...f, ja_respondeu: respondidas.has(f.id) })));
 });
 
 // ── App: responder pesquisa (1x por CPF) e ganhar moedas ─────────────────────
@@ -949,11 +1087,13 @@ app.post('/api/app/responder', async (c) => {
   const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, 'Content-Type': 'application/json', Accept: 'application/json' };
 
+  const auth = await autenticarApp(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error, precisa_cpf: auth.precisaCpf }, auth.status as any);
+  const cpfHash = auth.cpfHash;
+
   const body = await c.req.json().catch(() => ({}));
   const { formularioId, respostas } = body;
 
-  const cpfHash = cpfDoBody(body);
-  if (!cpfHash) return c.json({ error: 'CPF inválido' }, 400);
   if (!formularioId) return c.json({ error: 'formularioId obrigatório' }, 400);
   if (!Array.isArray(respostas) || respostas.length === 0)
     return c.json({ error: 'Envie as respostas da pesquisa' }, 400);
@@ -1013,11 +1153,10 @@ app.post('/api/app/saldo', async (c) => {
   const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Accept: 'application/json' };
 
-  const body = await c.req.json().catch(() => ({}));
-  const cpfHash = cpfDoBody(body);
-  if (!cpfHash) return c.json({ error: 'CPF inválido' }, 400);
+  const auth = await autenticarApp(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error, precisa_cpf: auth.precisaCpf }, auth.status as any);
 
-  return c.json(await calcularSaldo(supaUrl, hdrs, cpfHash));
+  return c.json(await calcularSaldo(supaUrl, hdrs, auth.cpfHash));
 });
 
 // ── App: loja de cupons (ativos, com estoque e dentro da validade) ───────────
@@ -1026,14 +1165,16 @@ app.post('/api/app/loja', async (c) => {
   const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Accept: 'application/json' };
 
+  const auth = await autenticarApp(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error, precisa_cpf: auth.precisaCpf }, auth.status as any);
+
   const body = await c.req.json().catch(() => ({}));
 
   // Cupons que ESTE CPF já resgatou, com o código entregue. O código só
   // aparecia uma vez (no alerta logo após o resgate) e se perdia ao fechar;
   // aqui ele fica recuperável a qualquer momento.
   if (body?.action === 'meus_resgates') {
-    const cpfHash = cpfDoBody(body);
-    if (!cpfHash) return c.json({ error: 'CPF inválido' }, 400);
+    const cpfHash = auth.cpfHash;
 
     const res = await fetch(
       `${supaUrl}/rest/v1/cupons_resgates?cpf_hash=eq.${cpfHash}` +
@@ -1075,18 +1216,13 @@ app.post('/api/app/loja', async (c) => {
       estoque_disponivel: quantidade - (resgatados || 0),
     }));
 
-  // Se veio CPF válido, marca quais este CPF já resgatou
-  const cpfHash = body.cpf ? cpfDoBody(body) : null;
-  if (cpfHash) {
-    const rRes = await fetch(
-      `${supaUrl}/rest/v1/cupons_resgates?cpf_hash=eq.${cpfHash}&select=cupom_id`,
-      { headers: hdrs }
-    );
-    const resgatados = new Set((rRes.ok ? await rRes.json() : []).map((r: any) => r.cupom_id));
-    return c.json(disponiveis.map(cp => ({ ...cp, ja_resgatado: resgatados.has(cp.id) })));
-  }
-
-  return c.json(disponiveis);
+  // Marca quais este CPF já resgatou
+  const rRes = await fetch(
+    `${supaUrl}/rest/v1/cupons_resgates?cpf_hash=eq.${auth.cpfHash}&select=cupom_id`,
+    { headers: hdrs }
+  );
+  const resgatados = new Set((rRes.ok ? await rRes.json() : []).map((r: any) => r.cupom_id));
+  return c.json(disponiveis.map(cp => ({ ...cp, ja_resgatado: resgatados.has(cp.id) })));
 });
 
 // ── App: resgatar cupom (1x por CPF por cupom) ───────────────────────────────
@@ -1095,10 +1231,12 @@ app.post('/api/app/resgatar', async (c) => {
   const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   const hdrs = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, 'Content-Type': 'application/json', Accept: 'application/json' };
 
+  const auth = await autenticarApp(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error, precisa_cpf: auth.precisaCpf }, auth.status as any);
+  const cpfHash = auth.cpfHash;
+
   const body = await c.req.json().catch(() => ({}));
   const { cupomId } = body;
-  const cpfHash = cpfDoBody(body);
-  if (!cpfHash) return c.json({ error: 'CPF inválido' }, 400);
   if (!cupomId) return c.json({ error: 'cupomId obrigatório' }, 400);
 
   // Cupom precisa estar ativo, com estoque e dentro da validade
