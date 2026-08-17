@@ -78,10 +78,22 @@ app.use('/api/app/*', rateLimit({ windowMs: 60_000, max: 30 }));
 // Não vaza detalhes internos (stack/serializeError) para o cliente.
 app.onError((err, c) => {
   console.error('[onError]', serializeError(err));
-  if (c.req.method !== 'GET') {
-    return c.json({ error: 'Ocorreu um erro no servidor.' }, 500);
+
+  // A página de erro detalhada mostra stack trace e por isso só pode existir
+  // em desenvolvimento. Antes o sanitizado valia apenas para métodos != GET,
+  // então qualquer GET que quebrasse devolvia o stack ao cliente — verificado
+  // em produção via /api/auth/token.
+  if (process.env.NODE_ENV !== 'production') {
+    if (c.req.method !== 'GET') {
+      return c.json({ error: 'Ocorreu um erro no servidor.' }, 500);
+    }
+    return c.html(getHTMLForErrorPage(err), 200);
   }
-  return c.html(getHTMLForErrorPage(err), 200);
+
+  if (c.req.method === 'GET' && !c.req.path.startsWith('/api/')) {
+    return c.html('<!doctype html><meta charset="utf-8"><title>Erro</title><p>Ocorreu um erro. Tente novamente.</p>', 500);
+  }
+  return c.json({ error: 'Ocorreu um erro no servidor.' }, 500);
 });
 
 if (process.env.CORS_ORIGINS) {
@@ -383,7 +395,7 @@ app.post('/api/user/data', async (c) => {
 
     // Perguntas
     const perguntasRes = await fetch(
-      `${supaUrl}/rest/v1/perguntas_formulario?formulario_id=eq.${formularioId}&order=ordem.asc`,
+      `${supaUrl}/rest/v1/perguntas_formulario?formulario_id=eq.${encodeURIComponent(String(formularioId))}&order=ordem.asc`,
       { headers: hdrs }
     );
     if (!perguntasRes.ok) return c.json({ error: await perguntasRes.text() }, 500);
@@ -398,7 +410,7 @@ app.post('/api/user/data', async (c) => {
 
     // Respostas
     const respostasRes = await fetch(
-      `${supaUrl}/rest/v1/respostas_formulario?formulario_id=eq.${formularioId}`,
+      `${supaUrl}/rest/v1/respostas_formulario?formulario_id=eq.${encodeURIComponent(String(formularioId))}`,
       { headers: hdrs }
     );
     if (!respostasRes.ok) return c.json({ error: await respostasRes.text() }, 500);
@@ -756,13 +768,13 @@ app.post('/api/retaguarda/forms', async (c) => {
 
   // UPDATE
   if (action === 'update') {
-    const fRes = await fetch(`${supaUrl}/rest/v1/formularios?id=eq.${formId}`, {
+    const fRes = await fetch(`${supaUrl}/rest/v1/formularios?id=eq.${encodeURIComponent(String(formId))}`, {
       method: 'PATCH', headers: hdrs,
       body: JSON.stringify({ titulo, descricao, moedas_recompensa: moedasRecompensa, updated_at: now }),
     });
     if (!fRes.ok) return c.json({ error: await fRes.text() }, 500);
 
-    await fetch(`${supaUrl}/rest/v1/perguntas_formulario?formulario_id=eq.${formId}`, {
+    await fetch(`${supaUrl}/rest/v1/perguntas_formulario?formulario_id=eq.${encodeURIComponent(String(formId))}`, {
       method: 'DELETE', headers: hdrs,
     });
     if (perguntas?.length) {
@@ -776,10 +788,10 @@ app.post('/api/retaguarda/forms', async (c) => {
 
   // DELETE
   if (action === 'delete') {
-    await fetch(`${supaUrl}/rest/v1/perguntas_formulario?formulario_id=eq.${formId}`, {
+    await fetch(`${supaUrl}/rest/v1/perguntas_formulario?formulario_id=eq.${encodeURIComponent(String(formId))}`, {
       method: 'DELETE', headers: hdrs,
     });
-    await fetch(`${supaUrl}/rest/v1/formularios?id=eq.${formId}`, {
+    await fetch(`${supaUrl}/rest/v1/formularios?id=eq.${encodeURIComponent(String(formId))}`, {
       method: 'DELETE', headers: hdrs,
     });
     return c.json({ ok: true });
@@ -789,7 +801,7 @@ app.post('/api/retaguarda/forms', async (c) => {
   if (action === 'get_questions') {
     if (!formId) return c.json({ error: 'formId obrigatório' }, 400);
     const res = await fetch(
-      `${supaUrl}/rest/v1/perguntas_formulario?formulario_id=eq.${formId}&order=ordem.asc`,
+      `${supaUrl}/rest/v1/perguntas_formulario?formulario_id=eq.${encodeURIComponent(String(formId))}&order=ordem.asc`,
       { headers: hdrs }
     );
     if (!res.ok) return c.json({ error: await res.text() }, 500);
@@ -952,6 +964,24 @@ function completarNumeros(opcoes: any[], entrevistados: number | null) {
   });
 }
 
+/**
+ * Só devolve a URL da fonte se for http(s).
+ *
+ * O link é digitado na Retaguarda e renderizado como `href` para TODOS os
+ * usuários pagantes. Sem esta checagem, um `javascript:...` gravado por uma
+ * conta de gestão comprometida executaria no navegador de cada cliente.
+ * Saneado no servidor porque assim vale para o site e para o app de uma vez.
+ */
+function urlSegura(valor: any): string | null {
+  if (!valor) return null;
+  try {
+    const u = new URL(String(valor));
+    return (u.protocol === 'http:' || u.protocol === 'https:') ? u.toString() : null;
+  } catch {
+    return null;   // não é URL absoluta válida
+  }
+}
+
 /** Monta a árvore pesquisa → blocos → opções a partir do embed do PostgREST. */
 function montarPesquisaExterna(p: any) {
   const blocos = (p.pesquisas_externas_blocos ?? [])
@@ -968,7 +998,7 @@ function montarPesquisaExterna(p: any) {
     }));
 
   const { pesquisas_externas_blocos, ...resto } = p;
-  return { ...resto, blocos };
+  return { ...resto, fonte_url: urlSegura(p.fonte_url), blocos };
 }
 
 const SELECT_PESQUISA_EXTERNA =
@@ -1003,7 +1033,7 @@ app.post('/api/retaguarda/pesquisas-externas', async (c) => {
 
   /** Regrava blocos e opções. O DELETE cascateia nas opções. */
   const gravarBlocos = async (pesquisaId: string) => {
-    await fetch(`${supaUrl}/rest/v1/pesquisas_externas_blocos?pesquisa_id=eq.${pesquisaId}`, {
+    await fetch(`${supaUrl}/rest/v1/pesquisas_externas_blocos?pesquisa_id=eq.${encodeURIComponent(String(pesquisaId))}`, {
       method: 'DELETE', headers: hdrs,
     });
     if (!Array.isArray(blocos) || blocos.length === 0) return null;
