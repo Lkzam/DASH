@@ -20,6 +20,8 @@ import {
   Inbox,
   Ticket,
   Coins,
+  Newspaper,
+  ExternalLink,
 } from "lucide-react";
 import { useDarkMode } from "../../contexts/DarkModeContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -65,6 +67,19 @@ function RetaguardaDashboardContent() {
     titulo: '', descricao: '', parceiro: 'ifood',
     custoMoedas: '', quantidade: '', validade: '',
   });
+
+  // Estados para pesquisas externas (números de terceiros lançados à mão)
+  const [pesquisasExternas, setPesquisasExternas] = useState([]);
+  const [loadingExternas, setLoadingExternas] = useState(false);
+  const [editingExterna, setEditingExterna] = useState(null); // null = fechado, {} = nova
+  const [salvandoExterna, setSalvandoExterna] = useState(false);
+  const [erroExterna, setErroExterna] = useState('');
+  const [externaForm, setExternaForm] = useState({
+    titulo: '', descricao: '', instituto: '', fonte_url: '',
+    data_pesquisa: '', entrevistados: '', margem_erro: '', abrangencia: '',
+  });
+  // Cada bloco vira um gráfico: { titulo, opcoes: [{ rotulo, votos, percentual }] }
+  const [externaBlocos, setExternaBlocos] = useState([]);
 
   // Estados para responder formulários
   const [formulariosParaResponder, setFormulariosParaResponder] = useState([]);
@@ -328,6 +343,141 @@ function RetaguardaDashboardContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentScreen]);
 
+  // ── Pesquisas externas ────────────────────────────────────────────────────
+  const chamarExternas = async (payload) => {
+    const token = await getToken();
+    const res = await fetch('/api/retaguarda/pesquisas-externas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    });
+    const dados = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(dados?.error || 'Erro na operação.');
+    return dados;
+  };
+
+  const carregarPesquisasExternas = async () => {
+    setLoadingExternas(true);
+    try {
+      setPesquisasExternas(await chamarExternas({ action: 'list' }));
+    } catch (err) {
+      console.error('[pesquisas-externas] erro:', err);
+      setPesquisasExternas([]);
+    } finally {
+      setLoadingExternas(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentScreen === 'externas') carregarPesquisasExternas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentScreen]);
+
+  const abrirEditorExterna = (p = null) => {
+    setErroExterna('');
+    setEditingExterna(p ?? {});
+    setExternaForm({
+      titulo: p?.titulo || '',
+      descricao: p?.descricao || '',
+      instituto: p?.instituto || '',
+      fonte_url: p?.fonte_url || '',
+      data_pesquisa: p?.data_pesquisa || '',
+      entrevistados: p?.entrevistados ?? '',
+      margem_erro: p?.margem_erro ?? '',
+      abrangencia: p?.abrangencia || '',
+    });
+    setExternaBlocos(
+      p?.blocos?.length
+        ? p.blocos.map(b => ({
+            titulo: b.titulo,
+            // Só reenvia o que foi digitado: o que o servidor derivou volta vazio,
+            // senão o valor calculado viraria valor "publicado" na próxima gravação.
+            opcoes: b.opcoes.map(o => ({
+              rotulo: o.rotulo,
+              votos: o.votos_calculado ? '' : (o.votos ?? ''),
+              percentual: o.percentual_calculado ? '' : (o.percentual ?? ''),
+            })),
+          }))
+        : [{ titulo: '', opcoes: [{ rotulo: '', votos: '', percentual: '' }] }]
+    );
+  };
+
+  const alterarBloco = (i, campo, valor) =>
+    setExternaBlocos(bs => bs.map((b, idx) => (idx === i ? { ...b, [campo]: valor } : b)));
+
+  const alterarOpcao = (i, j, campo, valor) =>
+    setExternaBlocos(bs => bs.map((b, idx) => idx !== i ? b : {
+      ...b,
+      opcoes: b.opcoes.map((o, jdx) => (jdx === j ? { ...o, [campo]: valor } : o)),
+    }));
+
+  const addBloco = () =>
+    setExternaBlocos(bs => [...bs, { titulo: '', opcoes: [{ rotulo: '', votos: '', percentual: '' }] }]);
+
+  const removerBloco = (i) => setExternaBlocos(bs => bs.filter((_, idx) => idx !== i));
+
+  const addOpcao = (i) =>
+    setExternaBlocos(bs => bs.map((b, idx) => idx !== i ? b : {
+      ...b, opcoes: [...b.opcoes, { rotulo: '', votos: '', percentual: '' }],
+    }));
+
+  const removerOpcao = (i, j) =>
+    setExternaBlocos(bs => bs.map((b, idx) => idx !== i ? b : {
+      ...b, opcoes: b.opcoes.filter((_, jdx) => jdx !== j),
+    }));
+
+  /** Soma dos percentuais do bloco — ajuda a flagrar erro de digitação. */
+  const somaPercentual = (bloco) =>
+    bloco.opcoes.reduce((s, o) => s + (parseFloat(o.percentual) || 0), 0);
+
+  const salvarExterna = async () => {
+    setErroExterna('');
+    if (!externaForm.titulo.trim()) { setErroExterna('Informe o título da pesquisa.'); return; }
+
+    const blocosValidos = externaBlocos
+      .map(b => ({
+        titulo: b.titulo,
+        opcoes: b.opcoes.filter(o => o.rotulo.trim() && (o.votos !== '' || o.percentual !== '')),
+      }))
+      .filter(b => b.opcoes.length > 0);
+
+    if (blocosValidos.length === 0) {
+      setErroExterna('Adicione ao menos um bloco com uma opção que tenha votos ou percentual.');
+      return;
+    }
+
+    setSalvandoExterna(true);
+    try {
+      await chamarExternas({
+        action: editingExterna?.id ? 'update' : 'create',
+        id: editingExterna?.id,
+        ...externaForm,
+        blocos: blocosValidos,
+      });
+      setEditingExterna(null);
+      carregarPesquisasExternas();
+    } catch (err) {
+      setErroExterna(err.message);
+    } finally {
+      setSalvandoExterna(false);
+    }
+  };
+
+  const alternarAtivoExterna = async (p) => {
+    try {
+      await chamarExternas({ action: 'toggle_ativo', id: p.id, ativo: !p.ativo });
+      carregarPesquisasExternas();
+    } catch (err) { console.error(err); }
+  };
+
+  const excluirExterna = async (p) => {
+    if (!window.confirm(`Excluir "${p.titulo}"? Os blocos e números serão perdidos.`)) return;
+    try {
+      await chamarExternas({ action: 'delete', id: p.id });
+      carregarPesquisasExternas();
+    } catch (err) { console.error(err); }
+  };
+
   const abrirEditorCupom = (cupom = null) => {
     setEditingCupom(cupom ?? {});
     setCupomForm(cupom ? {
@@ -434,6 +584,12 @@ function RetaguardaDashboardContent() {
       icon: Inbox,
       label: "Solicitações",
       active: currentScreen === "requests",
+    },
+    {
+      id: "externas",
+      icon: Newspaper,
+      label: "Pesquisas externas",
+      active: currentScreen === "externas",
     },
     {
       id: "cupons",
@@ -1996,6 +2152,315 @@ function RetaguardaDashboardContent() {
     );
   };
 
+  const renderExternasScreen = () => {
+    const card = isDarkMode ? 'bg-[#2A2E45] border-[#3A3E55]' : 'bg-white border-[#E4E9F2]';
+    const txt = isDarkMode ? 'text-white' : 'text-[#2A2E45]';
+    const sub = isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]';
+    const input = `w-full px-3 py-2 rounded border text-sm ${
+      isDarkMode ? 'bg-[#1A1D21] border-[#3A3E55] text-white' : 'bg-white border-[#E4E9F2] text-[#2A2E45]'
+    }`;
+    const label = `block text-xs font-medium mb-1 ${sub}`;
+
+    return (
+      <div className="flex flex-col h-full p-6 space-y-6 overflow-auto">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className={`text-2xl font-semibold ${txt}`}>Pesquisas externas</h1>
+            <p className={`text-sm mt-1 ${sub}`}>
+              Lance à mão os números de uma pesquisa publicada por terceiros. Elas aparecem
+              na tela de Pesquisa do usuário, identificadas pela fonte.
+            </p>
+          </div>
+          <button
+            onClick={() => abrirEditorExterna()}
+            className="flex items-center gap-2 px-4 py-2 rounded bg-[#4A6CF7] text-white text-sm font-medium hover:bg-[#3A5BE7]"
+          >
+            <Plus className="w-4 h-4" /> Nova pesquisa
+          </button>
+        </div>
+
+        {/* ── Editor ─────────────────────────────────────────────── */}
+        {editingExterna && (
+          <div className={`rounded-lg border p-5 space-y-5 ${card}`}>
+            <div className="flex items-center justify-between">
+              <h2 className={`text-lg font-semibold ${txt}`}>
+                {editingExterna.id ? 'Editar pesquisa' : 'Nova pesquisa externa'}
+              </h2>
+              <button onClick={() => setEditingExterna(null)} className={sub}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Identificação */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <label className={label}>Título *</label>
+                <input
+                  className={input}
+                  value={externaForm.titulo}
+                  onChange={e => setExternaForm(f => ({ ...f, titulo: e.target.value }))}
+                  placeholder="Ex: Intenção de voto para presidente — agosto"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className={label}>Descrição</label>
+                <input
+                  className={input}
+                  value={externaForm.descricao}
+                  onChange={e => setExternaForm(f => ({ ...f, descricao: e.target.value }))}
+                  placeholder="Observações sobre o recorte, cenário etc."
+                />
+              </div>
+            </div>
+
+            {/* Procedência — é o que torna o dado auditável */}
+            <div>
+              <p className={`text-xs font-semibold mb-2 ${sub}`}>PROCEDÊNCIA</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className={label}>Instituto</label>
+                  <input
+                    className={input}
+                    value={externaForm.instituto}
+                    onChange={e => setExternaForm(f => ({ ...f, instituto: e.target.value }))}
+                    placeholder="Datafolha, Quaest, G1..."
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className={label}>Link da matéria</label>
+                  <input
+                    className={input}
+                    value={externaForm.fonte_url}
+                    onChange={e => setExternaForm(f => ({ ...f, fonte_url: e.target.value }))}
+                    placeholder="https://..."
+                  />
+                </div>
+                <div>
+                  <label className={label}>Data da pesquisa</label>
+                  <input
+                    type="date"
+                    className={input}
+                    value={externaForm.data_pesquisa}
+                    onChange={e => setExternaForm(f => ({ ...f, data_pesquisa: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className={label}>Entrevistados (N)</label>
+                  <input
+                    type="number" min="1"
+                    className={input}
+                    value={externaForm.entrevistados}
+                    onChange={e => setExternaForm(f => ({ ...f, entrevistados: e.target.value }))}
+                    placeholder="2000"
+                  />
+                </div>
+                <div>
+                  <label className={label}>Margem de erro (p.p.)</label>
+                  <input
+                    type="number" step="0.1" min="0"
+                    className={input}
+                    value={externaForm.margem_erro}
+                    onChange={e => setExternaForm(f => ({ ...f, margem_erro: e.target.value }))}
+                    placeholder="2"
+                  />
+                </div>
+                <div className="md:col-span-3">
+                  <label className={label}>Abrangência</label>
+                  <input
+                    className={input}
+                    value={externaForm.abrangencia}
+                    onChange={e => setExternaForm(f => ({ ...f, abrangencia: e.target.value }))}
+                    placeholder="Nacional, São Paulo (SP), Campinas/SP..."
+                  />
+                </div>
+              </div>
+              <p className={`text-xs mt-2 ${sub}`}>
+                Informando o N, o sistema calcula quantas pessoas cada percentual representa.
+              </p>
+            </div>
+
+            {/* Blocos */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className={`text-xs font-semibold ${sub}`}>BLOCOS DE DADOS</p>
+                <button onClick={addBloco} className="text-xs font-medium text-[#4A6CF7] flex items-center gap-1">
+                  <Plus className="w-3 h-3" /> Adicionar bloco
+                </button>
+              </div>
+              <p className={`text-xs mb-3 ${sub}`}>
+                Cada bloco vira um gráfico. Ex: um bloco &quot;Intenção de voto&quot; com os candidatos
+                e outro &quot;Espectro político&quot; com esquerda/direita.
+              </p>
+
+              <div className="space-y-4">
+                {externaBlocos.map((bloco, i) => {
+                  const soma = somaPercentual(bloco);
+                  const somaSuspeita = soma > 0 && (soma < 95 || soma > 105);
+                  return (
+                    <div key={i} className={`rounded border p-4 ${isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'}`}>
+                      <div className="flex items-center gap-3 mb-3">
+                        <input
+                          className={input}
+                          value={bloco.titulo}
+                          onChange={e => alterarBloco(i, 'titulo', e.target.value)}
+                          placeholder={`Título do bloco ${i + 1} — ex: Intenção de voto`}
+                        />
+                        {externaBlocos.length > 1 && (
+                          <button onClick={() => removerBloco(i)} className="text-[#EF4444] shrink-0">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className={`grid grid-cols-12 gap-2 text-xs font-medium mb-1 ${sub}`}>
+                        <div className="col-span-6">Opção</div>
+                        <div className="col-span-2">Votos</div>
+                        <div className="col-span-3">%</div>
+                        <div className="col-span-1" />
+                      </div>
+
+                      {bloco.opcoes.map((op, j) => (
+                        <div key={j} className="grid grid-cols-12 gap-2 mb-2">
+                          <input
+                            className={`${input} col-span-6`}
+                            value={op.rotulo}
+                            onChange={e => alterarOpcao(i, j, 'rotulo', e.target.value)}
+                            placeholder="Ex: Lula"
+                          />
+                          <input
+                            type="number" min="0"
+                            className={`${input} col-span-2`}
+                            value={op.votos}
+                            onChange={e => alterarOpcao(i, j, 'votos', e.target.value)}
+                          />
+                          <input
+                            type="number" step="0.01" min="0" max="100"
+                            className={`${input} col-span-3`}
+                            value={op.percentual}
+                            onChange={e => alterarOpcao(i, j, 'percentual', e.target.value)}
+                          />
+                          <button
+                            onClick={() => removerOpcao(i, j)}
+                            disabled={bloco.opcoes.length === 1}
+                            className={`col-span-1 flex items-center justify-center ${
+                              bloco.opcoes.length === 1 ? 'opacity-30' : 'text-[#EF4444]'
+                            }`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+
+                      <div className="flex items-center justify-between mt-2">
+                        <button onClick={() => addOpcao(i)} className="text-xs font-medium text-[#4A6CF7] flex items-center gap-1">
+                          <Plus className="w-3 h-3" /> Adicionar opção
+                        </button>
+                        {soma > 0 && (
+                          <span className={`text-xs ${somaSuspeita ? 'text-[#F59E0B]' : sub}`}>
+                            Soma: {soma.toFixed(2)}%
+                            {somaSuspeita && ' — confira, não fecha 100%'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className={`text-xs mt-3 ${sub}`}>
+                Preencha votos, percentual, ou os dois. O que faltar é calculado — e aparece
+                marcado como estimativa para o usuário.
+              </p>
+            </div>
+
+            {erroExterna && <p className="text-sm text-[#EF4444]">{erroExterna}</p>}
+
+            <div className="flex gap-3">
+              <button
+                onClick={salvarExterna}
+                disabled={salvandoExterna}
+                className="flex items-center gap-2 px-4 py-2 rounded bg-[#4A6CF7] text-white text-sm font-medium disabled:opacity-60"
+              >
+                <Save className="w-4 h-4" />
+                {salvandoExterna ? 'Salvando...' : 'Salvar pesquisa'}
+              </button>
+              <button
+                onClick={() => setEditingExterna(null)}
+                className={`px-4 py-2 rounded border text-sm ${isDarkMode ? 'border-[#3A3E55] text-white' : 'border-[#E4E9F2]'}`}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Listagem ───────────────────────────────────────────── */}
+        {loadingExternas ? (
+          <p className={sub}>Carregando...</p>
+        ) : pesquisasExternas.length === 0 ? (
+          <div className={`rounded-lg border p-10 text-center ${card}`}>
+            <Newspaper className={`w-12 h-12 mx-auto mb-3 ${sub}`} />
+            <p className={`font-medium ${txt}`}>Nenhuma pesquisa externa cadastrada</p>
+            <p className={`text-sm mt-1 ${sub}`}>
+              Clique em &quot;Nova pesquisa&quot; para lançar os números de uma pesquisa publicada.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {pesquisasExternas.map(p => (
+              <div key={p.id} className={`rounded-lg border p-4 ${card} ${p.ativo ? '' : 'opacity-60'}`}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className={`font-semibold ${txt}`}>{p.titulo}</h3>
+                      {!p.ativo && (
+                        <span className={`text-xs px-2 py-0.5 rounded ${isDarkMode ? 'bg-[#3A3E55] text-[#B0B5C9]' : 'bg-[#E4E9F2] text-[#6F7689]'}`}>
+                          oculta
+                        </span>
+                      )}
+                    </div>
+                    <p className={`text-sm mt-1 ${sub}`}>
+                      {[
+                        p.instituto,
+                        p.data_pesquisa && new Date(p.data_pesquisa + 'T00:00:00').toLocaleDateString('pt-BR'),
+                        p.entrevistados && `${p.entrevistados} entrevistados`,
+                        p.margem_erro && `±${p.margem_erro} p.p.`,
+                        p.abrangencia,
+                      ].filter(Boolean).join(' · ') || 'Sem dados de procedência'}
+                    </p>
+                    <p className={`text-xs mt-1 ${sub}`}>
+                      {p.blocos.length} {p.blocos.length === 1 ? 'bloco' : 'blocos'}
+                      {' · '}
+                      {p.blocos.map(b => b.titulo).join(', ')}
+                    </p>
+                    {p.fonte_url && (
+                      <a
+                        href={p.fonte_url} target="_blank" rel="noopener noreferrer"
+                        className="text-xs text-[#4A6CF7] inline-flex items-center gap-1 mt-1"
+                      >
+                        <ExternalLink className="w-3 h-3" /> ver matéria
+                      </a>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => alternarAtivoExterna(p)} title={p.ativo ? 'Ocultar' : 'Exibir'} className={sub}>
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => abrirEditorExterna(p)} title="Editar" className={sub}>
+                      <Edit className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => excluirExterna(p)} title="Excluir" className="text-[#EF4444]">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderCuponsScreen = () => {
     const card = isDarkMode ? 'bg-[#2A2E45] border-[#3A3E55]' : 'bg-white border-[#E4E9F2]';
     const txt = isDarkMode ? 'text-white' : 'text-[#2A2E45]';
@@ -2207,6 +2672,8 @@ function RetaguardaDashboardContent() {
         return renderMapScreen();
       case "requests":
         return renderRequestsScreen();
+      case "externas":
+        return renderExternasScreen();
       case "cupons":
         return renderCuponsScreen();
       case "settings":

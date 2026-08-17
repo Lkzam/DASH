@@ -1,6 +1,9 @@
 ﻿import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronDown,
+  Newspaper,
+  ExternalLink,
   Home,
   Map,
   Search,
@@ -73,6 +76,9 @@ function DashboardContent() {
 
   // Estados para visualização de resultados de formulários
   const [formulariosComRespostas, setFormulariosComRespostas] = useState([]);
+  // Pesquisas de terceiros lançadas à mão pela Retaguarda
+  const [pesquisasExternas, setPesquisasExternas] = useState([]);
+  const [externaSelecionada, setExternaSelecionada] = useState(null);
   const [loadingFormularios, setLoadingFormularios] = useState(false);
   const [formularioSelecionado, setFormularioSelecionado] = useState(null);
   const [respostasFormulario, setRespostasFormulario] = useState([]);
@@ -180,6 +186,25 @@ function DashboardContent() {
       }
     };
     fetchFormulariosComRespostas();
+
+    // Pesquisas externas: segunda origem de dado, exibida na mesma tela.
+    // Falha separada de propósito — se esta quebrar, os formulários continuam.
+    const fetchPesquisasExternas = async () => {
+      if (currentScreen !== 'search' || !user?.id) return;
+      try {
+        const token = await getToken();
+        const res = await fetch('/api/user/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: 'list_pesquisas_externas' }),
+        });
+        setPesquisasExternas(res.ok ? await res.json() : []);
+      } catch (err) {
+        console.error('Erro ao buscar pesquisas externas:', err);
+        setPesquisasExternas([]);
+      }
+    };
+    fetchPesquisasExternas();
   }, [currentScreen, user?.id]);
 
   const showMessage = (type, text) => {
@@ -935,14 +960,64 @@ function DashboardContent() {
           <h1 className={`text-2xl font-semibold ${
             isDarkMode ? 'text-white' : 'text-[#2A2E45]'
           }`}>
-            Resultados dos Formulários
+            Pesquisas
           </h1>
           <p className={`text-sm mt-1 ${
             isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
           }`}>
-            Visualize e analise as respostas dos seus formulários
+            Respostas dos seus formulários e pesquisas publicadas por terceiros
           </p>
         </div>
+
+        {/* ── Pesquisas externas ─────────────────────────────────── */}
+        {pesquisasExternas.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {pesquisasExternas.map((p) => (
+              <div
+                key={p.id}
+                onClick={() => setExternaSelecionada(p)}
+                className={`rounded-lg border shadow-sm p-6 transition-all hover:shadow-md cursor-pointer ${
+                  isDarkMode
+                    ? 'bg-[#2A2E45] border-[#3A3E55] hover:border-[#1570FF]'
+                    : 'bg-white border-[#E4E9F2] hover:border-[#1570FF]'
+                }`}
+              >
+                {/* Selo de origem: deixa claro que o dado NÃO é do OpinAI */}
+                <div className="flex items-center gap-2 mb-3">
+                  <span className={`text-[11px] font-semibold px-2 py-0.5 rounded inline-flex items-center gap-1 ${
+                    isDarkMode ? 'bg-[#3A3E55] text-[#B0B5C9]' : 'bg-[#EDF3FF] text-[#1570FF]'
+                  }`}>
+                    <Newspaper className="w-3 h-3" />
+                    {p.instituto || 'Fonte externa'}
+                  </span>
+                  {p.data_pesquisa && (
+                    <span className={`text-[11px] ${isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'}`}>
+                      {new Date(p.data_pesquisa + 'T00:00:00').toLocaleDateString('pt-BR')}
+                    </span>
+                  )}
+                </div>
+
+                <h3 className={`font-semibold text-lg mb-1 ${isDarkMode ? 'text-white' : 'text-[#2A2E45]'}`}>
+                  {p.titulo}
+                </h3>
+                {p.descricao && (
+                  <p className={`text-sm line-clamp-2 ${isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'}`}>
+                    {p.descricao}
+                  </p>
+                )}
+
+                <div className={`flex items-center justify-between pt-4 mt-4 border-t ${
+                  isDarkMode ? 'border-[#3A3E55]' : 'border-[#E4E9F2]'
+                }`}>
+                  <span className={`text-sm ${isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'}`}>
+                    {p.entrevistados ? `${p.entrevistados.toLocaleString('pt-BR')} entrevistados` : `${p.blocos.length} ${p.blocos.length === 1 ? 'recorte' : 'recortes'}`}
+                  </span>
+                  <span className="text-xs font-medium text-[#1570FF]">Ver dados</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Loading */}
         {loadingFormularios ? (
@@ -1021,8 +1096,144 @@ function DashboardContent() {
           </div>
         )}
 
+        {/* Modal de resultados de PESQUISA EXTERNA (um gráfico por bloco) */}
+        {externaSelecionada && createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+            onClick={(e) => { if (e.target === e.currentTarget) setExternaSelecionada(null); }}
+          >
+            <div
+              className={`w-full max-w-4xl max-h-[90vh] overflow-auto rounded-lg shadow-2xl ${
+                isDarkMode ? 'bg-[#1A1D21]' : 'bg-white'
+              }`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className={`sticky top-0 z-10 flex items-start justify-between p-6 border-b ${
+                isDarkMode ? 'bg-[#1A1D21] border-[#3A3E55]' : 'bg-white border-[#E4E9F2]'
+              }`}>
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded inline-flex items-center gap-1 ${
+                      isDarkMode ? 'bg-[#3A3E55] text-[#B0B5C9]' : 'bg-[#EDF3FF] text-[#1570FF]'
+                    }`}>
+                      <Newspaper className="w-3 h-3" />
+                      {externaSelecionada.instituto || 'Fonte externa'}
+                    </span>
+                  </div>
+                  <h2 className={`text-2xl font-semibold ${isDarkMode ? 'text-white' : 'text-[#2A2E45]'}`}>
+                    {externaSelecionada.titulo}
+                  </h2>
+                  {externaSelecionada.descricao && (
+                    <p className={`text-sm mt-1 ${isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'}`}>
+                      {externaSelecionada.descricao}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => setExternaSelecionada(null)}
+                  className={`p-2 rounded ${isDarkMode ? 'text-[#B0B5C9] hover:bg-[#2A2E45]' : 'text-[#6F7689] hover:bg-[#F7F9FC]'}`}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-6 space-y-8">
+                {/* Ficha técnica — sem ela o número não é auditável */}
+                <div className={`rounded border p-4 text-sm grid grid-cols-2 md:grid-cols-4 gap-4 ${
+                  isDarkMode ? 'border-[#3A3E55] text-[#B0B5C9]' : 'border-[#E4E9F2] text-[#6F7689]'
+                }`}>
+                  <div>
+                    <p className="text-xs opacity-70">Data</p>
+                    <p className="font-medium">
+                      {externaSelecionada.data_pesquisa
+                        ? new Date(externaSelecionada.data_pesquisa + 'T00:00:00').toLocaleDateString('pt-BR')
+                        : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs opacity-70">Entrevistados</p>
+                    <p className="font-medium">
+                      {externaSelecionada.entrevistados?.toLocaleString('pt-BR') ?? '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs opacity-70">Margem de erro</p>
+                    <p className="font-medium">
+                      {externaSelecionada.margem_erro != null ? `±${externaSelecionada.margem_erro} p.p.` : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs opacity-70">Abrangência</p>
+                    <p className="font-medium">{externaSelecionada.abrangencia || '—'}</p>
+                  </div>
+                </div>
+
+                {externaSelecionada.blocos.map((bloco) => {
+                  const maior = Math.max(...bloco.opcoes.map(o => o.percentual ?? 0), 1);
+                  return (
+                    <div key={bloco.id}>
+                      <h3 className={`font-semibold mb-4 ${isDarkMode ? 'text-white' : 'text-[#2A2E45]'}`}>
+                        {bloco.titulo}
+                      </h3>
+                      <div className="space-y-3">
+                        {bloco.opcoes.map((o) => (
+                          <div key={o.id}>
+                            <div className="flex items-baseline justify-between mb-1">
+                              <span className={`text-sm font-medium ${isDarkMode ? 'text-white' : 'text-[#2A2E45]'}`}>
+                                {o.rotulo}
+                              </span>
+                              <span className={`text-sm ${isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'}`}>
+                                {o.percentual != null && (
+                                  <strong className={isDarkMode ? 'text-white' : 'text-[#2A2E45]'}>
+                                    {o.percentual}%
+                                  </strong>
+                                )}
+                                {o.votos != null && (
+                                  <span className="ml-2">
+                                    {o.votos.toLocaleString('pt-BR')} {o.votos === 1 ? 'pessoa' : 'pessoas'}
+                                    {/* Distingue número publicado de número derivado */}
+                                    {o.votos_calculado && ' (est.)'}
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <div className={`h-2.5 rounded-full overflow-hidden ${isDarkMode ? 'bg-[#2A2E45]' : 'bg-[#EDF1F7]'}`}>
+                              <div
+                                className="h-full rounded-full bg-[#1570FF]"
+                                style={{ width: `${((o.percentual ?? 0) / maior) * 100}%` }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {externaSelecionada.fonte_url && (
+                  <a
+                    href={externaSelecionada.fonte_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-sm text-[#1570FF]"
+                  >
+                    <ExternalLink className="w-4 h-4" /> Ver a matéria original
+                  </a>
+                )}
+
+                <p className={`text-xs ${isDarkMode ? 'text-[#8A8FA6]' : 'text-[#6F7689]'}`}>
+                  Dados publicados por terceiros e lançados manualmente. Valores marcados
+                  com &quot;est.&quot; foram calculados a partir do percentual e do total de
+                  entrevistados.
+                </p>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
         {/* Modal de Resultados */}
-        {formularioSelecionado && (
+        {formularioSelecionado && createPortal(
           <div
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
             onClick={(e) => {
@@ -1261,7 +1472,8 @@ function DashboardContent() {
                 )}
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     );

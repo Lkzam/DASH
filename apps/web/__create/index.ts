@@ -466,6 +466,18 @@ app.post('/api/user/data', async (c) => {
     return c.json({ perguntas: perguntasParseadas, respostas: todas });
   }
 
+  // ── PESQUISAS EXTERNAS (só leitura; cadastro é pela Retaguarda) ──
+  if (action === 'list_pesquisas_externas') {
+    const res = await fetch(
+      `${supaUrl}/rest/v1/pesquisas_externas?ativo=eq.true&select=${SELECT_PESQUISA_EXTERNA}` +
+      `&order=data_pesquisa.desc.nullslast,created_at.desc`,
+      { headers: hdrs }
+    );
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    const linhas: any[] = await res.json();
+    return c.json(linhas.map(montarPesquisaExterna));
+  }
+
   // ── CPF ────────────────────────────────────────────────────
   if (action === 'get_cpf') {
     const res = await fetch(
@@ -894,11 +906,222 @@ app.post('/api/retaguarda/cupons', async (c) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ═════════════════════════════════════════════════════════════════════════════
-// API PÚBLICA DO APLICATIVO (coleta de pesquisas por CPF, sem login)
-// Identificação por CPF com hash SHA-256 + pepper (LGPD: CPF puro nunca é
-// gravado). Regras garantidas também por UNIQUE no banco:
+// PESQUISAS EXTERNAS (números de terceiros lançados à mão pela Retaguarda)
+//
+// Segunda origem de dado de pesquisa: as outras telas montam gráficos a partir
+// das RESPOSTAS dos formulários; aqui o gestor lê uma pesquisa publicada
+// (G1, Datafolha...) e digita os números. Estrutura em 3 níveis:
+//   pesquisa → blocos (cada um vira um gráfico) → opções (linhas do gráfico)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Completa o que faltar entre votos e percentual.
+ *
+ * Matéria de jornal às vezes traz só o %, às vezes só o número de pessoas.
+ * Guardamos os dois como opcionais e derivamos o que der:
+ *   - % a partir dos votos, usando a soma do bloco como total
+ *   - votos a partir do %, usando o N (entrevistados) da pesquisa
+ *
+ * Marca o que foi derivado (`_calculado`) para a tela poder distinguir número
+ * publicado de número estimado — importante num produto de dado eleitoral.
+ */
+function completarNumeros(opcoes: any[], entrevistados: number | null) {
+  const totalVotos = opcoes.reduce((s, o) => s + (o.votos ?? 0), 0);
+
+  return opcoes.map((o) => {
+    let percentual = o.percentual != null ? Number(o.percentual) : null;
+    let votos = o.votos != null ? Number(o.votos) : null;
+    let pctCalculado = false;
+    let votosCalculado = false;
+
+    if (percentual == null && votos != null && totalVotos > 0) {
+      percentual = Number(((votos / totalVotos) * 100).toFixed(2));
+      pctCalculado = true;
+    }
+    if (votos == null && percentual != null && entrevistados && entrevistados > 0) {
+      votos = Math.round((percentual / 100) * entrevistados);
+      votosCalculado = true;
+    }
+
+    return {
+      id: o.id, rotulo: o.rotulo, ordem: o.ordem,
+      votos, percentual,
+      percentual_calculado: pctCalculado,
+      votos_calculado: votosCalculado,
+    };
+  });
+}
+
+/** Monta a árvore pesquisa → blocos → opções a partir do embed do PostgREST. */
+function montarPesquisaExterna(p: any) {
+  const blocos = (p.pesquisas_externas_blocos ?? [])
+    .slice()
+    .sort((a: any, b: any) => a.ordem - b.ordem)
+    .map((b: any) => ({
+      id: b.id,
+      titulo: b.titulo,
+      ordem: b.ordem,
+      opcoes: completarNumeros(
+        (b.pesquisas_externas_opcoes ?? []).slice().sort((x: any, y: any) => x.ordem - y.ordem),
+        p.entrevistados ?? null,
+      ),
+    }));
+
+  const { pesquisas_externas_blocos, ...resto } = p;
+  return { ...resto, blocos };
+}
+
+const SELECT_PESQUISA_EXTERNA =
+  '*,pesquisas_externas_blocos(id,titulo,ordem,pesquisas_externas_opcoes(id,rotulo,votos,percentual,ordem))';
+
+app.post('/api/retaguarda/pesquisas-externas', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = {
+    apikey: supaKey, Authorization: `Bearer ${supaKey}`,
+    'Content-Type': 'application/json', Accept: 'application/json',
+  };
+
+  const auth = await verificarRetaguarda(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+
+  const body = await c.req.json().catch(() => ({}));
+  const { action, id, blocos } = body;
+
+  // Campos da pesquisa, normalizados (string vazia do formulário vira null).
+  const vazio = (v: any) => (v === '' || v === undefined ? null : v);
+  const campos = () => ({
+    titulo: String(body.titulo ?? '').trim(),
+    descricao: vazio(body.descricao),
+    instituto: vazio(body.instituto),
+    fonte_url: vazio(body.fonte_url),
+    data_pesquisa: vazio(body.data_pesquisa),
+    entrevistados: body.entrevistados ? Number(body.entrevistados) : null,
+    margem_erro: body.margem_erro ? Number(body.margem_erro) : null,
+    abrangencia: vazio(body.abrangencia),
+  });
+
+  /** Regrava blocos e opções. O DELETE cascateia nas opções. */
+  const gravarBlocos = async (pesquisaId: string) => {
+    await fetch(`${supaUrl}/rest/v1/pesquisas_externas_blocos?pesquisa_id=eq.${pesquisaId}`, {
+      method: 'DELETE', headers: hdrs,
+    });
+    if (!Array.isArray(blocos) || blocos.length === 0) return null;
+
+    const linhasBloco = blocos.map((b: any, i: number) => ({
+      pesquisa_id: pesquisaId,
+      titulo: String(b.titulo ?? '').trim() || `Bloco ${i + 1}`,
+      ordem: i,
+    }));
+
+    const bRes = await fetch(`${supaUrl}/rest/v1/pesquisas_externas_blocos`, {
+      method: 'POST', headers: { ...hdrs, Prefer: 'return=representation' },
+      body: JSON.stringify(linhasBloco),
+    });
+    if (!bRes.ok) return await bRes.text();
+    const criados: any[] = await bRes.json();
+
+    // PostgREST devolve na mesma ordem enviada; casamos pelo índice.
+    const linhasOpcao: any[] = [];
+    blocos.forEach((b: any, i: number) => {
+      (b.opcoes ?? []).forEach((o: any, j: number) => {
+        const rotulo = String(o.rotulo ?? '').trim();
+        const votos = o.votos === '' || o.votos == null ? null : Number(o.votos);
+        const percentual = o.percentual === '' || o.percentual == null ? null : Number(o.percentual);
+        // A constraint chk_opcao_tem_numero rejeitaria os dois nulos.
+        if (!rotulo || (votos == null && percentual == null)) return;
+        linhasOpcao.push({ bloco_id: criados[i].id, rotulo, votos, percentual, ordem: j });
+      });
+    });
+
+    if (linhasOpcao.length > 0) {
+      const oRes = await fetch(`${supaUrl}/rest/v1/pesquisas_externas_opcoes`, {
+        method: 'POST', headers: hdrs, body: JSON.stringify(linhasOpcao),
+      });
+      if (!oRes.ok) return await oRes.text();
+    }
+    return null;
+  };
+
+  if (action === 'list') {
+    const res = await fetch(
+      `${supaUrl}/rest/v1/pesquisas_externas?select=${SELECT_PESQUISA_EXTERNA}&order=created_at.desc`,
+      { headers: hdrs }
+    );
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    const linhas: any[] = await res.json();
+    return c.json(linhas.map(montarPesquisaExterna));
+  }
+
+  if (action === 'create') {
+    const dados = campos();
+    if (!dados.titulo) return c.json({ error: 'Título é obrigatório' }, 400);
+
+    const pRes = await fetch(`${supaUrl}/rest/v1/pesquisas_externas`, {
+      method: 'POST', headers: { ...hdrs, Prefer: 'return=representation' },
+      body: JSON.stringify({ ...dados, criado_por: auth.userId }),
+    });
+    if (!pRes.ok) return c.json({ error: await pRes.text() }, 500);
+    const nova = (await pRes.json())[0];
+
+    const erro = await gravarBlocos(nova.id);
+    if (erro) {
+      console.error('[pesquisas-externas:create]', erro);
+      return c.json({ error: 'Pesquisa criada, mas houve erro ao gravar os blocos.' }, 500);
+    }
+    return c.json({ ok: true, id: nova.id });
+  }
+
+  if (action === 'update') {
+    if (!id) return c.json({ error: 'id obrigatório' }, 400);
+    const dados = campos();
+    if (!dados.titulo) return c.json({ error: 'Título é obrigatório' }, 400);
+
+    const pRes = await fetch(`${supaUrl}/rest/v1/pesquisas_externas?id=eq.${encodeURIComponent(String(id))}`, {
+      method: 'PATCH', headers: hdrs,
+      body: JSON.stringify({ ...dados, updated_at: new Date().toISOString() }),
+    });
+    if (!pRes.ok) return c.json({ error: await pRes.text() }, 500);
+
+    const erro = await gravarBlocos(String(id));
+    if (erro) {
+      console.error('[pesquisas-externas:update]', erro);
+      return c.json({ error: 'Erro ao gravar os blocos.' }, 500);
+    }
+    return c.json({ ok: true });
+  }
+
+  if (action === 'toggle_ativo') {
+    if (!id) return c.json({ error: 'id obrigatório' }, 400);
+    const res = await fetch(`${supaUrl}/rest/v1/pesquisas_externas?id=eq.${encodeURIComponent(String(id))}`, {
+      method: 'PATCH', headers: hdrs,
+      body: JSON.stringify({ ativo: Boolean(body.ativo), updated_at: new Date().toISOString() }),
+    });
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json({ ok: true });
+  }
+
+  if (action === 'delete') {
+    if (!id) return c.json({ error: 'id obrigatório' }, 400);
+    // Blocos e opções somem por ON DELETE CASCADE.
+    const res = await fetch(`${supaUrl}/rest/v1/pesquisas_externas?id=eq.${encodeURIComponent(String(id))}`, {
+      method: 'DELETE', headers: hdrs,
+    });
+    if (!res.ok) return c.json({ error: await res.text() }, 500);
+    return c.json({ ok: true });
+  }
+
+  return c.json({ error: 'Ação desconhecida' }, 400);
+});
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ═════════════════════════════════════════════════════════════════════════════
+// API DO APLICATIVO (exige JWT da conta; o CPF vem do perfil, não do corpo)
+// O CPF é hasheado com SHA-256 + pepper nas tabelas do app. Regras garantidas
+// também por UNIQUE no banco:
 //   - 1 resposta por CPF por pesquisa (app_respostas)
 //   - 1 resgate por CPF por cupom (cupons_resgates)
+//   - 1 conta por CPF (perfil_usuario)
 // ═════════════════════════════════════════════════════════════════════════════
 
 function normalizarCpf(raw: unknown): string {
