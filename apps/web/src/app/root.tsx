@@ -23,7 +23,6 @@ import './global.css';
 
 import fetch from '@/__create/fetch';
 // @ts-ignore
-import { SessionProvider } from '@auth/create/react';
 import { useNavigate } from 'react-router';
 import { serializeError } from 'serialize-error';
 import { Toaster } from 'sonner';
@@ -390,9 +389,8 @@ export function Layout({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
-  return (
-    <SessionProvider>
-      <Outlet />
-    </SessionProvider>
-  );
+  // Sem SessionProvider: o login é 100% Supabase (contexts/AuthContext).
+  // O provider vinha do scaffold @hono/auth-js, removido por trazer
+  // @auth/core com CVE crítico e não ser usado por nada.
+  return <Outlet />;
 }
