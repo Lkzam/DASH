@@ -394,25 +394,18 @@ function DashboardContent() {
       console.log(`  → Resposta para pergunta ${pergunta.id}:`, respostaItem);
 
       if (respostaItem && respostaItem.resposta) {
-        if (Array.isArray(respostaItem.resposta)) {
-          // Checkbox - múltiplas seleções
-          console.log('  ✅ Array detectado (checkbox):', respostaItem.resposta);
-          respostaItem.resposta.forEach(opcao => {
-            if (contagemOpcoes.hasOwnProperty(opcao)) {
-              contagemOpcoes[opcao]++;
-              console.log(`    ➕ Incrementando "${opcao}": ${contagemOpcoes[opcao]}`);
-            }
-          });
-        } else {
-          // Múltipla escolha - única seleção
-          console.log('  ✅ String detectada (múltipla escolha):', respostaItem.resposta);
-          if (contagemOpcoes.hasOwnProperty(respostaItem.resposta)) {
-            contagemOpcoes[respostaItem.resposta]++;
-            console.log(`    ➕ Incrementando "${respostaItem.resposta}": ${contagemOpcoes[respostaItem.resposta]}`);
-          }
-        }
-      } else {
-        console.log('  ⚠️ Resposta vazia ou não encontrada para esta pergunta');
+        // Duas origens gravam checkbox de formas diferentes: o site guarda
+        // array, o APLICATIVO junta as opções com "; ". Sem tratar os dois,
+        // as respostas vindas do app não eram contadas e a pergunta aparecia
+        // zerada. Ver a nota "Funcionalidades e Correções".
+        const valor = respostaItem.resposta;
+        const escolhas = Array.isArray(valor)
+          ? valor
+          : (String(valor).includes('; ') ? String(valor).split('; ').map(s => s.trim()) : [valor]);
+
+        escolhas.forEach(opcao => {
+          if (contagemOpcoes.hasOwnProperty(opcao)) contagemOpcoes[opcao]++;
+        });
       }
     });
 
