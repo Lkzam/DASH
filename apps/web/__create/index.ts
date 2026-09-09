@@ -152,6 +152,70 @@ app.use('*', async (c, next) => {
   return next();
 });
 
+// ── Manter o BANCO acordado ──────────────────────────────────────────────────
+// O Supabase (plano free) PAUSA o projeto após ~7 dias sem atividade, e religar
+// exige entrar no painel na mão. Sete dias é uma janela curta: um feriado
+// prolongado ou um mês fora de período eleitoral derruba o banco.
+//
+// Diferença crucial em relação ao keep-alive da Asaas: aquele podia ser
+// oportunista porque a janela é de 90 dias. Aqui NÃO basta — o Render (free)
+// dorme após 15 min, então num período sem visitas o servidor está desligado
+// justamente quando o ping seria necessário. Por isso existe o endpoint abaixo,
+// para ser chamado DE FORA (ver .github/workflows/keep-alive.yml).
+const PING_CHAVE = 'keepalive_ping';
+let bancoTocadoEm = 0;   // throttle: uma escrita real por hora, no máximo
+
+async function tocarBanco(): Promise<'ok' | 'throttled' | 'erro' | 'sem-config'> {
+  const supaUrl = process.env.SUPABASE_URL;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supaUrl || !supaKey) return 'sem-config';
+
+  const agora = Date.now();
+  if (agora - bancoTocadoEm < 3_600_000) return 'throttled';
+
+  try {
+    const res = await fetch(`${supaUrl}/rest/v1/sistema_estado`, {
+      method: 'POST',
+      headers: {
+        apikey: supaKey,
+        Authorization: `Bearer ${supaKey}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify({
+        chave: PING_CHAVE,
+        valor: 'ok',
+        atualizado_em: new Date().toISOString(),
+      }),
+    });
+    if (!res.ok) {
+      console.error('[keepalive] escrita no banco falhou — HTTP', res.status);
+      return 'erro';
+    }
+    bancoTocadoEm = agora;
+    return 'ok';
+  } catch (e: any) {
+    console.error('[keepalive] banco inacessível:', e?.message ?? e);
+    return 'erro';
+  }
+}
+
+// Endpoint para o pingador externo. Escreve de verdade no banco (não só lê),
+// porque é a escrita que conta como atividade para o Supabase.
+//
+// Responde 503 quando o banco não responde: assim o próprio pingador vira
+// monitoramento — o GitHub Actions falha e te manda e-mail.
+app.get('/api/keepalive', async (c) => {
+  const db = await tocarBanco();
+  // A chave da Asaas segue a própria janela de 30 dias; aqui só damos a
+  // oportunidade de ela ser exercitada junto.
+  manterChaveAsaasViva().catch((e) => console.error('[asaas/keepalive]', e?.message ?? e));
+
+  const ok = db !== 'erro';
+  return c.json({ ok, banco: db, em: new Date().toISOString() }, ok ? 200 : 503);
+});
+
+
 
 // Não vaza detalhes internos (stack/serializeError) para o cliente.
 app.onError((err, c) => {

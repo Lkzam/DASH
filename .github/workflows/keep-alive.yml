@@ -1,0 +1,34 @@
+# Mantém acordados os serviços de plano gratuito.
+#
+# Por que precisa ser EXTERNO: o Render (free) dorme após 15 min sem tráfego,
+# então um agendador dentro do próprio servidor não roda justamente no período
+# de inatividade — que é quando ele seria necessário. Este workflow chama o
+# site de fora, acordando o Render, que por sua vez escreve no Supabase.
+#
+# As duas janelas que estamos protegendo:
+#   Supabase (free) → PAUSA o projeto após ~7 dias sem atividade
+#   Asaas           → DESABILITA a chave de API após 3 meses sem uso
+#
+# Rodamos a cada 3 dias: metade da janela mais curta, então uma execução
+# falhada ainda deixa margem para a próxima.
+name: keep-alive
+
+on:
+  schedule:
+    - cron: '0 12 */3 * *'   # a cada 3 dias, 12:00 UTC (09:00 em Brasília)
+  workflow_dispatch:          # permite rodar na mão pelo painel do GitHub
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acordar o Render e tocar o banco
+        run: |
+          # --max-time generoso: o cold start do Render leva ~50s.
+          # --retry cobre o caso de o primeiro toque estourar o tempo.
+          # -f faz o passo FALHAR em resposta != 2xx, e o endpoint devolve 503
+          #    quando o banco não responde — ou seja, isto também é monitoramento:
+          #    se o banco cair, o GitHub te manda e-mail.
+          curl -fsS --max-time 180 --retry 3 --retry-delay 20 --retry-all-errors \
+            https://opinai-q6sm.onrender.com/api/keepalive
+          echo
