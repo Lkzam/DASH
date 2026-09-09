@@ -23,6 +23,9 @@ yarn.lock
 .env.production.local
 .env.staging
 # Manter somente o exemplo
+.env.bak*
+*.bak
+
 !.env.example
 
 # ============================================================

@@ -30,6 +30,68 @@ const app = new Hono();
 
 app.use('*', requestId());
 
+// ═════════════════════════════════════════════════════════════════════════════
+// SUPER-ADMIN (dono do sistema) + MODO MANUTENÇÃO
+//
+// O dono do sistema é fixado por e-mail. É uma salvaguarda do desenvolvedor:
+// não pode ter o acesso revogado nem a conta apagada pela Retaguarda, e é o
+// único que enxerga a tela "Secret".
+//
+// ⚠️ Fixar por e-mail tem uma fraqueza: quem tiver acesso ao painel do Supabase
+// poderia, em tese, renomear o e-mail de outra conta para este. Para blindar de
+// vez, trocar por USER_ID (UUID imutável). O e-mail abaixo vem do JWT verificado
+// contra /auth/v1/user, então não é forjável por requisição.
+const EMAIL_DONO = 'lucamr150405@gmail.com';
+const ehDono = (email?: string) => (email ?? '').trim().toLowerCase() === EMAIL_DONO;
+
+// Modo manutenção: um "freio de mão" reversível, guardado no banco.
+//   sistema_ativo === 'off'  → o servidor recusa as requisições (503)
+//   asaas_ativo   === 'off'  → recusa NOVAS assinaturas (não mexe nas existentes)
+// Nada é destruído: religar restaura tudo. É um kill switch reversível, não
+// sabotagem — cortar dados seria irreversível e juridicamente indefensável.
+let estadoCache: { sistema: boolean; asaas: boolean; em: number } = { sistema: true, asaas: true, em: 0 };
+
+async function lerEstadoSistema(): Promise<{ sistema: boolean; asaas: boolean }> {
+  const supaUrl = process.env.SUPABASE_URL;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supaUrl || !supaKey) return { sistema: true, asaas: true };
+
+  // Cache de 30s: não vale ir ao banco a cada requisição só por causa do freio.
+  if (Date.now() - estadoCache.em < 30_000) return estadoCache;
+
+  try {
+    const res = await fetch(
+      `${supaUrl}/rest/v1/sistema_estado?chave=in.(sistema_ativo,asaas_ativo)&select=chave,valor`,
+      { headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` } }
+    );
+    const linhas: any[] = res.ok ? await res.json() : [];
+    const val = (c: string) => linhas.find((l) => l.chave === c)?.valor;
+    // Ausente = ligado. Só 'off' desliga — fail-safe: erro de leitura mantém no ar.
+    estadoCache = {
+      sistema: val('sistema_ativo') !== 'off',
+      asaas: val('asaas_ativo') !== 'off',
+      em: Date.now(),
+    };
+  } catch {
+    estadoCache = { sistema: true, asaas: true, em: Date.now() };
+  }
+  return estadoCache;
+}
+
+// Middleware do freio de mão. Deixa passar SEMPRE:
+//   - a tela Secret e seu endpoint (senão o dono se tranca fora ao desligar)
+//   - páginas não-API (para o site mostrar um aviso em vez de JSON cru)
+app.use('/api/*', async (c, next) => {
+  const path = c.req.path;
+  if (path.startsWith('/api/retaguarda/secret') || path === '/api/keepalive') return next();
+
+  const { sistema } = await lerEstadoSistema();
+  if (!sistema) {
+    return c.json({ error: 'Sistema temporariamente indisponível para manutenção.' }, 503);
+  }
+  return next();
+});
+
 app.use('*', (c, next) => {
   const requestId = c.get('requestId');
   return als.run({ requestId }, () => next());
@@ -1769,6 +1831,19 @@ app.post('/api/retaguarda/permissions', async (c) => {
   }
 
   if (action === 'revoke') {
+    // Guarda 0: o dono do sistema NUNCA pode ter o acesso revogado. É a
+    // salvaguarda do desenvolvedor contra ser trancado fora do próprio sistema.
+    // Busca o e-mail real do alvo (não confia em nada vindo do cliente).
+    try {
+      const alvoRes = await fetch(`${supaUrl}/auth/v1/admin/users/${targetUserId}`, { headers: hdrs });
+      if (alvoRes.ok) {
+        const alvo = await alvoRes.json();
+        if (ehDono(alvo?.email)) {
+          return c.json({ error: 'Este acesso é protegido e não pode ser revogado.' }, 403);
+        }
+      }
+    } catch { /* na dúvida, as guardas abaixo ainda se aplicam */ }
+
     // Guarda 1: não deixar o gestor tirar o próprio acesso.
     // Sem isto, um clique errado tranca a pessoa fora da Retaguarda e a
     // recuperação exige mexer no banco na mão.
@@ -1837,12 +1912,20 @@ app.post('/api/retaguarda/assinaturas', async (c) => {
       { headers: hdrs }
     );
     if (!planosRes.ok) return c.json({ error: await planosRes.text() }, 500);
-    const planos: any[] = await planosRes.json();
+    const todos: any[] = await planosRes.json();
+
+    // Só quem tem cobrança REAL na Asaas. Os acessos dados à mão pelo banco
+    // (gestores, cortesias) têm `permanente` e não têm `asaas_subscription_id`
+    // — não são clientes pagantes e poluiriam a régua de inadimplência.
+    // Contamos os manuais só para exibir "+N acessos manuais" na tela.
+    const planos = todos.filter((p) => p.asaas_subscription_id);
+    const acessosManuais = todos.length - planos.length;
 
     // Sem chave configurada a tela ainda funciona, só sem o lado da Asaas.
     if (!asaasKey) {
       return c.json({
         asaas_indisponivel: 'ASAAS_API_KEY não configurada — mostrando apenas os dados locais.',
+        acessos_manuais: acessosManuais,
         assinaturas: planos.map((p) => ({ ...p, asaas: null, cobrancas: [] })),
       });
     }
@@ -1892,7 +1975,7 @@ app.post('/api/retaguarda/assinaturas', async (c) => {
       };
     });
 
-    return c.json({ assinaturas });
+    return c.json({ assinaturas, acessos_manuais: acessosManuais });
   }
 
   // ── Bloquear / reativar o acesso (no NOSSO banco) ────────────────────────
@@ -1927,6 +2010,67 @@ app.post('/api/retaguarda/assinaturas', async (c) => {
       return c.json({ error: 'A Asaas recusou o cancelamento.' }, 502);
     }
     return c.json({ ok: true });
+  }
+
+  return c.json({ error: 'Ação desconhecida' }, 400);
+});
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SECRET — painel do dono (freio de mão reversível)
+//
+// Só o EMAIL_DONO acessa. Não exige permissão de retaguarda: é uma camada acima
+// dela, para o caso de o próprio acesso de retaguarda ter sido tirado.
+//
+// O que faz: liga/desliga o sistema e o cadastro de novas assinaturas. Tudo
+// REVERSÍVEL — os toggles vivem em sistema_estado e nada é apagado. Existe como
+// contingência do desenvolvedor; a proteção jurídica de verdade é a cláusula de
+// suspensão por inadimplência no contrato, não este botão.
+// ═════════════════════════════════════════════════════════════════════════════
+app.post('/api/retaguarda/secret', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = {
+    apikey: supaKey, Authorization: `Bearer ${supaKey}`,
+    'Content-Type': 'application/json', Accept: 'application/json',
+    Prefer: 'resolution=merge-duplicates',
+  };
+
+  const auth = await verificarUsuario(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+  // Porta trancada: qualquer não-dono recebe 404, como se a rota não existisse.
+  if (!ehDono(auth.email)) return c.json({ error: 'Não encontrado' }, 404);
+
+  const body = await c.req.json().catch(() => ({}));
+  const { action } = body;
+
+  const gravar = async (chave: string, valor: string) => {
+    const r = await fetch(`${supaUrl}/rest/v1/sistema_estado`, {
+      method: 'POST', headers: hdrs,
+      body: JSON.stringify({ chave, valor, atualizado_em: new Date().toISOString() }),
+    });
+    estadoCache = { sistema: true, asaas: true, em: 0 };   // invalida o cache
+    return r.ok;
+  };
+
+  if (action === 'status') {
+    estadoCache = { sistema: true, asaas: true, em: 0 };
+    const est = await lerEstadoSistema();
+    return c.json({ sistema_ativo: est.sistema, asaas_ativo: est.asaas });
+  }
+
+  // Liga/desliga o sistema inteiro (modo manutenção → 503 em /api/*).
+  if (action === 'set_sistema') {
+    const ok = await gravar('sistema_ativo', body.ativo ? 'on' : 'off');
+    if (!ok) return c.json({ error: 'Falha ao gravar' }, 500);
+    return c.json({ ok: true, sistema_ativo: Boolean(body.ativo) });
+  }
+
+  // Liga/desliga o cadastro de NOVAS assinaturas (não toca nas existentes).
+  if (action === 'set_asaas') {
+    const ok = await gravar('asaas_ativo', body.ativo ? 'on' : 'off');
+    if (!ok) return c.json({ error: 'Falha ao gravar' }, 500);
+    return c.json({ ok: true, asaas_ativo: Boolean(body.ativo) });
   }
 
   return c.json({ error: 'Ação desconhecida' }, 400);

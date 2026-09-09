@@ -14,6 +14,23 @@ function json(data, status = 200) {
 
 export async function POST(request) {
   try {
+    // Freio do dono (tela Secret): novas assinaturas podem estar suspensas.
+    // Fail-safe: só bloqueia com 'off' explícito; erro de leitura deixa passar.
+    try {
+      const SUPA_URL = process.env.SUPABASE_URL;
+      const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (SUPA_URL && SUPA_KEY) {
+        const est = await fetch(
+          `${SUPA_URL}/rest/v1/sistema_estado?chave=eq.asaas_ativo&select=valor`,
+          { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } },
+        );
+        const linhas = est.ok ? await est.json() : [];
+        if (linhas[0]?.valor === 'off') {
+          return json({ error: 'Novas assinaturas estão temporariamente indisponíveis.' }, 503);
+        }
+      }
+    } catch { /* leitura falhou — segue e cria normalmente */ }
+
     const body = await request.json();
     const { nome, email, cpf, telefone } = body;
     const tier = body.tier || body.plano;
