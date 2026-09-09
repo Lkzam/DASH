@@ -75,6 +75,84 @@ app.use('/api/user/data', rateLimit({ windowMs: 60_000, max: 80 }));
 // API pública do aplicativo (sem login): limite mais apertado por IP.
 app.use('/api/app/*', rateLimit({ windowMs: 60_000, max: 30 }));
 
+// ═════════════════════════════════════════════════════════════════════════════
+// KEEP-ALIVE DA CHAVE DA ASAAS
+//
+// A Asaas DESABILITA chaves de API sem uso após 3 meses (e expira após 6).
+// No nosso modelo isso é uma armadilha silenciosa: a cobrança recorrente roda
+// do lado da Asaas, então a nossa chave só é usada quando alguém assina pela
+// PRIMEIRA vez. Três meses sem assinatura nova — plausível fora de período
+// eleitoral — e a chave morre. Os clientes atuais seguem sendo cobrados, mas o
+// próximo que tentar assinar recebe erro, e o sintoma parece bug do site.
+//
+// Solução: uma leitura barata (GET /myAccount) no máximo uma vez por mês.
+//
+// O carimbo vai para o BANCO, não para a memória: o Render (free) dorme e
+// reinicia o processo, então um setInterval de 30 dias nunca dispararia.
+// O gatilho é oportunista — qualquer requisição serve. Se o site ficar 3 meses
+// sem nenhum acesso a chave expira, mas aí o negócio está parado de qualquer
+// forma.
+// ═════════════════════════════════════════════════════════════════════════════
+const KEEPALIVE_CHAVE = 'asaas_keepalive';
+const KEEPALIVE_DIAS = 30;
+let keepaliveVerificadoEm = 0;   // throttle em memória: no máx. 1 consulta/hora
+
+async function manterChaveAsaasViva() {
+  const apiKey = process.env.ASAAS_API_KEY;
+  const supaUrl = process.env.SUPABASE_URL;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!apiKey || !supaUrl || !supaKey) return;
+
+  // Evita consultar o banco a cada requisição.
+  const agora = Date.now();
+  if (agora - keepaliveVerificadoEm < 3_600_000) return;
+  keepaliveVerificadoEm = agora;
+
+  const hdrs = {
+    apikey: supaKey,
+    Authorization: `Bearer ${supaKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    Prefer: 'resolution=merge-duplicates',
+  };
+
+  const res = await fetch(
+    `${supaUrl}/rest/v1/sistema_estado?chave=eq.${KEEPALIVE_CHAVE}&select=atualizado_em`,
+    { headers: hdrs }
+  );
+  const linhas: any[] = res.ok ? await res.json() : [];
+  const ultimo = linhas[0]?.atualizado_em ? new Date(linhas[0].atualizado_em).getTime() : 0;
+  if (agora - ultimo < KEEPALIVE_DIAS * 86_400_000) return;
+
+  // Leitura pura: não cria cobrança nem move dinheiro.
+  const asaasUrl = process.env.ASAAS_API_URL || 'https://api.asaas.com/v3';
+  const ping = await fetch(`${asaasUrl}/myAccount`, { headers: { access_token: apiKey } });
+  if (!ping.ok) {
+    // Não carimba a data: assim tenta de novo na próxima janela em vez de
+    // "esquecer" que a chave está com problema.
+    console.error('[asaas/keepalive] a chave NÃO autenticou — HTTP', ping.status);
+    return;
+  }
+
+  await fetch(`${supaUrl}/rest/v1/sistema_estado`, {
+    method: 'POST',
+    headers: hdrs,
+    body: JSON.stringify({
+      chave: KEEPALIVE_CHAVE,
+      valor: 'ok',
+      atualizado_em: new Date().toISOString(),
+    }),
+  });
+  console.log('[asaas/keepalive] chave exercitada com sucesso');
+}
+
+// Dispara em segundo plano: nunca atrasa nem quebra a resposta ao usuário.
+app.use('*', async (c, next) => {
+  manterChaveAsaasViva().catch((e) => console.error('[asaas/keepalive]', e?.message ?? e));
+  return next();
+});
+
+
 // Não vaza detalhes internos (stack/serializeError) para o cliente.
 app.onError((err, c) => {
   console.error('[onError]', serializeError(err));
