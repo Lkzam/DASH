@@ -137,6 +137,9 @@ app.use('/api/check-retaguarda', rateLimit({ windowMs: 60_000, max: 40 }));
 app.use('/api/user/data', rateLimit({ windowMs: 60_000, max: 80 }));
 // API pública do aplicativo (sem login): limite mais apertado por IP.
 app.use('/api/app/*', rateLimit({ windowMs: 60_000, max: 30 }));
+// Criar assinatura é público e cria cliente + assinatura na Asaas: sem limite,
+// um script poderia poluir a conta Asaas com clientes/assinaturas em massa.
+app.use('/api/asaas/criar-assinatura', rateLimit({ windowMs: 60_000, max: 6 }));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // KEEP-ALIVE DA CHAVE DA ASAAS
@@ -1811,13 +1814,13 @@ app.post('/api/retaguarda/permissions', async (c) => {
   if (action === 'grant') {
     // Verifica se já existe registro
     const existRes = await fetch(
-      `${supaUrl}/rest/v1/permissoes_retaguarda?user_id=eq.${targetUserId}`,
+      `${supaUrl}/rest/v1/permissoes_retaguarda?user_id=eq.${encodeURIComponent(String(targetUserId))}`,
       { headers: hdrs }
     );
     const existing: any[] = existRes.ok ? await existRes.json() : [];
 
     if (existing.length > 0) {
-      await fetch(`${supaUrl}/rest/v1/permissoes_retaguarda?user_id=eq.${targetUserId}`, {
+      await fetch(`${supaUrl}/rest/v1/permissoes_retaguarda?user_id=eq.${encodeURIComponent(String(targetUserId))}`, {
         method: 'PATCH', headers: hdrs,
         body: JSON.stringify({ ativo: true, concedido_por: auth.userId, concedido_em: new Date().toISOString() }),
       });
@@ -1835,7 +1838,7 @@ app.post('/api/retaguarda/permissions', async (c) => {
     // salvaguarda do desenvolvedor contra ser trancado fora do próprio sistema.
     // Busca o e-mail real do alvo (não confia em nada vindo do cliente).
     try {
-      const alvoRes = await fetch(`${supaUrl}/auth/v1/admin/users/${targetUserId}`, { headers: hdrs });
+      const alvoRes = await fetch(`${supaUrl}/auth/v1/admin/users/${encodeURIComponent(String(targetUserId))}`, { headers: hdrs });
       if (alvoRes.ok) {
         const alvo = await alvoRes.json();
         if (ehDono(alvo?.email)) {
