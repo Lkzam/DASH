@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { tabelaPlanosMarkdown } from '../src/config/planos.js';
 import nodeConsole from 'node:console';
 import { createHash, randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
@@ -266,9 +267,7 @@ SOBRE O OPINAI:
 - Painel admin (Retaguarda) para gestores
 
 PLANOS (3 tiers, assinatura MENSAL recorrente via Asaas — PIX, cartão ou boleto):
-- Básico — R$150: ver todas as pesquisas + acesso ao banco de dados eleitoral.
-- Médio — R$300: tudo do Básico + poder requisitar pesquisas personalizadas (cota mensal).
-- Máximo — R$1.500: tudo do Médio + pesquisas ilimitadas e prioridade máxima.
+${tabelaPlanosMarkdown()}
 
 PROBLEMAS COMUNS:
 - Sem acesso após pagamento: aguarde alguns minutos e faça logout/login

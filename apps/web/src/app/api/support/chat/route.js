@@ -1,3 +1,4 @@
+import { tabelaPlanosMarkdown } from '../../../../config/planos.js';
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL = 'llama-3.3-70b-versatile';
 
@@ -36,11 +37,7 @@ OpinAI é uma plataforma de análise eleitoral que oferece:
 
 Três planos, cada um com acesso por 30 dias:
 
-| Plano  | Preço      | O que inclui |
-|--------|------------|--------------|
-| Básico | R$ 150,00  | Ver todas as pesquisas + acesso ao banco de dados eleitoral |
-| Médio  | R$ 300,00  | Tudo do Básico + requisitar pesquisas personalizadas (cota mensal) |
-| Máximo | R$ 1.500,00| Tudo do Médio + pesquisas ilimitadas e prioridade máxima |
+${tabelaPlanosMarkdown()}
 
 O pagamento é feito via PIX, cartão de crédito ou boleto (assinatura mensal recorrente pelo Asaas).
 Após o pagamento ser confirmado, o acesso é liberado automaticamente em alguns minutos.

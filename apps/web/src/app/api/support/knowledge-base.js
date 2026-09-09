@@ -1,3 +1,4 @@
+import { tabelaPlanosMarkdown } from '../../../config/planos.js';
 // Base de conhecimento do assistente de suporte — edite este arquivo para atualizar as respostas da IA
 export const KNOWLEDGE_BASE = `
 ## IDENTIDADE DO ASSISTENTE
@@ -32,11 +33,7 @@ OpinAI é uma plataforma de análise eleitoral que oferece:
 
 ## PLANOS E PREÇOS
 
-| Plano  | Preço       | O que inclui (acesso por 30 dias) |
-|--------|-------------|-----------------------------------|
-| Básico | R$ 150,00   | Ver todas as pesquisas + banco de dados eleitoral |
-| Médio  | R$ 300,00   | Tudo do Básico + requisitar pesquisas (cota mensal) |
-| Máximo | R$ 1.500,00 | Tudo do Médio + pesquisas ilimitadas e prioridade |
+${tabelaPlanosMarkdown()}
 
 O pagamento é feito via PIX, cartão de crédito ou boleto através do Asaas (assinatura mensal recorrente).
 Após o pagamento ser confirmado, o acesso é liberado automaticamente.

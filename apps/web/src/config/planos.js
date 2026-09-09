@@ -86,3 +86,29 @@ export function duracaoDias(tier) {
 export function getPlano(tier) {
   return PLANOS[tier] ?? null;
 }
+
+/**
+ * Tabela de planos em markdown, para os prompts das IAs de suporte.
+ *
+ * Existe para que um preço alterado aqui chegue TAMBÉM ao que a IA responde ao
+ * cliente. Antes a tabela era escrita à mão em três arquivos: mexer no preço
+ * atualizava o site e a cobrança, mas a IA seguia informando o valor antigo —
+ * e o cliente descobria a divergência na pior hora.
+ */
+export function tabelaPlanosMarkdown() {
+  const linhas = TIERS.map((t) => {
+    const p = PLANOS[t];
+    const nome = p.nome.replace(/^Plano /, '');
+    const cota =
+      p.cotaPesquisas === null ? 'ilimitadas'
+      : p.cotaPesquisas === 0 ? 'não inclui'
+      : `${p.cotaPesquisas} por mês`;
+    return `| ${nome} | ${p.precoLabel} | ${p.descricao} | ${cota} |`;
+  });
+
+  return [
+    '| Plano | Preço | O que inclui (acesso por 30 dias) | Requisitar pesquisas |',
+    '|-------|-------|-----------------------------------|----------------------|',
+    ...linhas,
+  ].join('\n');
+}
