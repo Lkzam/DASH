@@ -1769,10 +1769,163 @@ app.post('/api/retaguarda/permissions', async (c) => {
   }
 
   if (action === 'revoke') {
-    await fetch(`${supaUrl}/rest/v1/permissoes_retaguarda?user_id=eq.${targetUserId}`, {
+    // Guarda 1: não deixar o gestor tirar o próprio acesso.
+    // Sem isto, um clique errado tranca a pessoa fora da Retaguarda e a
+    // recuperação exige mexer no banco na mão.
+    if (targetUserId === auth.userId) {
+      return c.json({ error: 'Você não pode revogar o seu próprio acesso.' }, 403);
+    }
+
+    // Guarda 2: nunca deixar a Retaguarda sem NENHUM gestor ativo — isso
+    // trancaria todo mundo para fora, com recuperação só via SQL.
+    const ativosRes = await fetch(
+      `${supaUrl}/rest/v1/permissoes_retaguarda?ativo=eq.true&select=user_id`,
+      { headers: hdrs }
+    );
+    const ativos: any[] = ativosRes.ok ? await ativosRes.json() : [];
+    if (ativos.length <= 1 && ativos.some((p) => p.user_id === targetUserId)) {
+      return c.json({ error: 'Este é o último gestor ativo. Conceda acesso a outra pessoa antes de revogar.' }, 409);
+    }
+
+    const res = await fetch(`${supaUrl}/rest/v1/permissoes_retaguarda?user_id=eq.${encodeURIComponent(String(targetUserId))}`, {
       method: 'PATCH', headers: hdrs,
       body: JSON.stringify({ ativo: false }),
     });
+    // O resultado da gravação era ignorado: a tela dizia "revogado" mesmo
+    // quando nada tinha sido gravado.
+    if (!res.ok) {
+      console.error('[retaguarda/permissions:revoke]', await res.text());
+      return c.json({ error: 'Não foi possível revogar o acesso.' }, 500);
+    }
+    return c.json({ ok: true });
+  }
+
+  return c.json({ error: 'Ação desconhecida' }, 400);
+});
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// GESTÃO DE ASSINATURAS (Retaguarda)
+//
+// Cruza o que temos no banco (planos_usuario) com o estado real na Asaas.
+// Os dois podem divergir — webhook perdido, cobrança vencida, assinatura
+// cancelada direto no painel da Asaas — e é justamente essa divergência que
+// a tela precisa mostrar.
+// ═════════════════════════════════════════════════════════════════════════════
+app.post('/api/retaguarda/assinaturas', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = {
+    apikey: supaKey, Authorization: `Bearer ${supaKey}`,
+    'Content-Type': 'application/json', Accept: 'application/json',
+  };
+
+  const auth = await verificarRetaguarda(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status as any);
+
+  const asaasUrl = process.env.ASAAS_API_URL || 'https://api.asaas.com/v3';
+  const asaasKey = process.env.ASAAS_API_KEY;
+  const asaasHdrs = { access_token: asaasKey ?? '', 'Content-Type': 'application/json' };
+
+  const body = await c.req.json().catch(() => ({}));
+  const { action, assinaturaId } = body;
+
+  // ── Listagem: banco + Asaas lado a lado ──────────────────────────────────
+  if (!action || action === 'list') {
+    const planosRes = await fetch(
+      `${supaUrl}/rest/v1/planos_usuario?select=*&order=updated_at.desc`,
+      { headers: hdrs }
+    );
+    if (!planosRes.ok) return c.json({ error: await planosRes.text() }, 500);
+    const planos: any[] = await planosRes.json();
+
+    // Sem chave configurada a tela ainda funciona, só sem o lado da Asaas.
+    if (!asaasKey) {
+      return c.json({
+        asaas_indisponivel: 'ASAAS_API_KEY não configurada — mostrando apenas os dados locais.',
+        assinaturas: planos.map((p) => ({ ...p, asaas: null, cobrancas: [] })),
+      });
+    }
+
+    // Uma chamada por assinatura seria N+1. Puxamos as cobranças recentes de
+    // uma vez e agrupamos em memória.
+    let pagamentos: any[] = [];
+    try {
+      const payRes = await fetch(`${asaasUrl}/payments?limit=100&order=desc`, { headers: asaasHdrs });
+      if (payRes.ok) pagamentos = (await payRes.json())?.data ?? [];
+    } catch (e: any) {
+      console.error('[retaguarda/assinaturas] Asaas indisponível:', e?.message ?? e);
+    }
+
+    const porAssinatura = new Map<string, any[]>();
+    for (const pg of pagamentos) {
+      if (!pg.subscription) continue;
+      const lista = porAssinatura.get(pg.subscription) ?? [];
+      lista.push(pg);
+      porAssinatura.set(pg.subscription, lista);
+    }
+
+    const agora = Date.now();
+    const assinaturas = planos.map((p) => {
+      const cobrancas = (porAssinatura.get(p.asaas_subscription_id) ?? []).map((pg) => ({
+        id: pg.id,
+        valor: pg.value,
+        status: pg.status,
+        vencimento: pg.dueDate,
+        pago_em: pg.paymentDate ?? null,
+        link: pg.invoiceUrl ?? null,
+      }));
+
+      // Em atraso = tem cobrança vencida e não paga na Asaas.
+      const emAtraso = cobrancas.some((cb) => cb.status === 'OVERDUE');
+      // Acesso expirado = o que o NOSSO banco diz, independente da Asaas.
+      const fim = p.data_fim ? new Date(p.data_fim).getTime() : 0;
+      const acessoExpirado = !p.permanente && p.status === 'ativo' && fim > 0 && fim < agora;
+
+      return {
+        ...p,
+        cobrancas,
+        em_atraso: emAtraso,
+        acesso_expirado: acessoExpirado,
+        // Divergência: banco diz ativo mas a Asaas tem cobrança vencida.
+        divergente: p.status === 'ativo' && emAtraso,
+      };
+    });
+
+    return c.json({ assinaturas });
+  }
+
+  // ── Bloquear / reativar o acesso (no NOSSO banco) ────────────────────────
+  // Não mexe na Asaas de propósito: cancelar a cobrança é decisão financeira,
+  // feita no painel dela. Aqui só se corta ou devolve o acesso ao sistema.
+  if (action === 'bloquear' || action === 'reativar') {
+    const { planoId } = body;
+    if (!planoId) return c.json({ error: 'planoId obrigatório' }, 400);
+
+    const novoStatus = action === 'bloquear' ? 'cancelado' : 'ativo';
+    const res = await fetch(`${supaUrl}/rest/v1/planos_usuario?id=eq.${encodeURIComponent(String(planoId))}`, {
+      method: 'PATCH', headers: hdrs,
+      body: JSON.stringify({ status: novoStatus, updated_at: new Date().toISOString() }),
+    });
+    if (!res.ok) {
+      console.error('[retaguarda/assinaturas]', await res.text());
+      return c.json({ error: 'Não foi possível alterar o acesso.' }, 500);
+    }
+    return c.json({ ok: true, status: novoStatus });
+  }
+
+  // ── Cancelar a assinatura na Asaas (para de cobrar) ──────────────────────
+  if (action === 'cancelar_asaas') {
+    if (!asaasKey) return c.json({ error: 'ASAAS_API_KEY não configurada.' }, 503);
+    if (!assinaturaId) return c.json({ error: 'assinaturaId obrigatório' }, 400);
+
+    const res = await fetch(`${asaasUrl}/subscriptions/${encodeURIComponent(String(assinaturaId))}`, {
+      method: 'DELETE', headers: asaasHdrs,
+    });
+    if (!res.ok) {
+      console.error('[retaguarda/assinaturas:cancelar]', await res.text());
+      return c.json({ error: 'A Asaas recusou o cancelamento.' }, 502);
+    }
     return c.json({ ok: true });
   }
 

@@ -68,6 +68,12 @@ function RetaguardaDashboardContent() {
     custoMoedas: '', quantidade: '', validade: '',
   });
 
+  // Estados para gestão de assinaturas (banco + Asaas)
+  const [assinaturas, setAssinaturas] = useState([]);
+  const [loadingAssin, setLoadingAssin] = useState(false);
+  const [filtroAssin, setFiltroAssin] = useState('todos');
+  const [erroAssin, setErroAssin] = useState('');
+
   // Estados para pesquisas externas (números de terceiros lançados à mão)
   const [pesquisasExternas, setPesquisasExternas] = useState([]);
   const [loadingExternas, setLoadingExternas] = useState(false);
@@ -343,6 +349,63 @@ function RetaguardaDashboardContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentScreen]);
 
+  // ── Gestão de assinaturas ─────────────────────────────────────────────────
+  const chamarAssinaturas = async (payload) => {
+    const token = await getToken();
+    const res = await fetch('/api/retaguarda/assinaturas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    });
+    const dados = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(dados?.error || 'Erro na operação.');
+    return dados;
+  };
+
+  const carregarAssinaturas = async () => {
+    setLoadingAssin(true);
+    setErroAssin('');
+    try {
+      const r = await chamarAssinaturas({ action: 'list' });
+      setAssinaturas(r.assinaturas ?? []);
+      // A tela funciona sem a Asaas, só sem o lado das cobranças — avisa em vez
+      // de mostrar "nenhum atraso" e dar falsa sensação de que está tudo em dia.
+      if (r.asaas_indisponivel) setErroAssin(r.asaas_indisponivel);
+    } catch (err) {
+      setErroAssin(err.message);
+      setAssinaturas([]);
+    } finally {
+      setLoadingAssin(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentScreen === 'assinaturas') carregarAssinaturas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentScreen]);
+
+  const alternarAcesso = async (a) => {
+    const bloqueando = a.status === 'ativo';
+    const msg = bloqueando
+      ? `Bloquear o acesso de ${a.email}?\n\nEle perde o uso do sistema imediatamente. A cobrança na Asaas NÃO é cancelada por isso.`
+      : `Reativar o acesso de ${a.email}?`;
+    if (!window.confirm(msg)) return;
+    try {
+      await chamarAssinaturas({ action: bloqueando ? 'bloquear' : 'reativar', planoId: a.id });
+      carregarAssinaturas();
+    } catch (err) { setErroAssin(err.message); }
+  };
+
+  const cancelarNaAsaas = async (a) => {
+    if (!window.confirm(
+      `Cancelar a assinatura de ${a.email} na Asaas?\n\nEle deixa de ser cobrado nos próximos ciclos. Esta ação NÃO pode ser desfeita pelo sistema — para voltar a cobrar, é preciso criar uma assinatura nova.`
+    )) return;
+    try {
+      await chamarAssinaturas({ action: 'cancelar_asaas', assinaturaId: a.asaas_subscription_id });
+      carregarAssinaturas();
+    } catch (err) { setErroAssin(err.message); }
+  };
+
   // ── Pesquisas externas ────────────────────────────────────────────────────
   const chamarExternas = async (payload) => {
     const token = await getToken();
@@ -584,6 +647,12 @@ function RetaguardaDashboardContent() {
       icon: Inbox,
       label: "Solicitações",
       active: currentScreen === "requests",
+    },
+    {
+      id: "assinaturas",
+      icon: Coins,
+      label: "Assinaturas",
+      active: currentScreen === "assinaturas",
     },
     {
       id: "externas",
@@ -2461,6 +2530,188 @@ function RetaguardaDashboardContent() {
     );
   };
 
+  const renderAssinaturasScreen = () => {
+    const card = isDarkMode ? 'bg-[#2A2E45] border-[#3A3E55]' : 'bg-white border-[#E4E9F2]';
+    const txt = isDarkMode ? 'text-white' : 'text-[#2A2E45]';
+    const sub = isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]';
+
+    const dinheiro = (v) =>
+      typeof v === 'number' ? v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
+    const dataBr = (d) => (d ? new Date(d).toLocaleDateString('pt-BR') : '—');
+
+    const filtradas = assinaturas.filter((a) => {
+      if (filtroAssin === 'atraso') return a.em_atraso;
+      if (filtroAssin === 'ativos') return a.status === 'ativo' && !a.em_atraso;
+      if (filtroAssin === 'inativos') return a.status !== 'ativo';
+      return true;
+    });
+
+    const contagem = {
+      todos: assinaturas.length,
+      ativos: assinaturas.filter((a) => a.status === 'ativo' && !a.em_atraso).length,
+      atraso: assinaturas.filter((a) => a.em_atraso).length,
+      inativos: assinaturas.filter((a) => a.status !== 'ativo').length,
+    };
+
+    return (
+      <div className="flex flex-col h-full p-6 space-y-6 overflow-auto">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className={`text-2xl font-semibold ${txt}`}>Assinaturas</h1>
+            <p className={`text-sm mt-1 ${sub}`}>
+              Clientes pagantes, situação das cobranças na Asaas e controle de acesso.
+            </p>
+          </div>
+          <button
+            onClick={carregarAssinaturas}
+            className={`px-4 py-2 rounded border text-sm ${isDarkMode ? 'border-[#3A3E55] text-white' : 'border-[#E4E9F2]'}`}
+          >
+            Atualizar
+          </button>
+        </div>
+
+        {erroAssin && (
+          <div className="rounded-lg border border-[#F59E0B] bg-[#F59E0B]/10 p-3">
+            <p className="text-sm text-[#F59E0B]">{erroAssin}</p>
+          </div>
+        )}
+
+        <div className="flex gap-2 flex-wrap">
+          {[
+            ['todos', 'Todos', contagem.todos],
+            ['ativos', 'Em dia', contagem.ativos],
+            ['atraso', 'Em atraso', contagem.atraso],
+            ['inativos', 'Sem acesso', contagem.inativos],
+          ].map(([id, rotulo, n]) => (
+            <button
+              key={id}
+              onClick={() => setFiltroAssin(id)}
+              className={`px-3 py-1.5 rounded text-sm font-medium border ${
+                filtroAssin === id
+                  ? 'bg-[#4A6CF7] text-white border-[#4A6CF7]'
+                  : isDarkMode ? 'border-[#3A3E55] text-[#B0B5C9]' : 'border-[#E4E9F2] text-[#6F7689]'
+              }`}
+            >
+              {rotulo} ({n})
+            </button>
+          ))}
+        </div>
+
+        {loadingAssin ? (
+          <p className={sub}>Carregando...</p>
+        ) : filtradas.length === 0 ? (
+          <div className={`rounded-lg border p-10 text-center ${card}`}>
+            <Users className={`w-12 h-12 mx-auto mb-3 ${sub}`} />
+            <p className={`font-medium ${txt}`}>Nenhuma assinatura nesta situação</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filtradas.map((a) => {
+              const semAcesso = a.status !== 'ativo';
+              return (
+                <div key={a.id} className={`rounded-lg border p-4 ${card} ${semAcesso ? 'opacity-70' : ''}`}>
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className={`font-semibold ${txt}`}>{a.email}</h3>
+                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                          isDarkMode ? 'bg-[#3A3E55] text-[#B0B5C9]' : 'bg-[#EDF3FF] text-[#1570FF]'
+                        }`}>
+                          {a.tier ? a.tier.toUpperCase() : 'SEM TIER'}
+                        </span>
+                        {a.em_atraso && (
+                          <span className="text-xs px-2 py-0.5 rounded font-medium bg-[#EF4444]/15 text-[#EF4444]">
+                            EM ATRASO
+                          </span>
+                        )}
+                        {a.divergente && (
+                          <span className="text-xs px-2 py-0.5 rounded font-medium bg-[#F59E0B]/15 text-[#F59E0B]">
+                            DIVERGENTE
+                          </span>
+                        )}
+                        {a.acesso_expirado && (
+                          <span className="text-xs px-2 py-0.5 rounded font-medium bg-[#F59E0B]/15 text-[#F59E0B]">
+                            ACESSO VENCIDO
+                          </span>
+                        )}
+                        {a.permanente && (
+                          <span className="text-xs px-2 py-0.5 rounded font-medium bg-[#10B981]/15 text-[#10B981]">
+                            PERMANENTE
+                          </span>
+                        )}
+                      </div>
+
+                      <p className={`text-sm mt-1 ${sub}`}>
+                        {[
+                          `status: ${a.status}`,
+                          a.data_inicio && `início ${dataBr(a.data_inicio)}`,
+                          a.data_fim && `acesso até ${dataBr(a.data_fim)}`,
+                          a.pesquisas_cota === null ? 'cota ilimitada' : `cota ${a.pesquisas_cota ?? 0}`,
+                        ].filter(Boolean).join(' · ')}
+                      </p>
+
+                      {a.cobrancas?.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                          <p className={`text-xs font-semibold ${sub}`}>ÚLTIMAS COBRANÇAS</p>
+                          {a.cobrancas.slice(0, 3).map((cb) => (
+                            <div key={cb.id} className="flex items-center gap-3 text-xs">
+                              <span className={`font-medium ${
+                                cb.status === 'OVERDUE' ? 'text-[#EF4444]'
+                                : cb.status === 'RECEIVED' || cb.status === 'CONFIRMED' ? 'text-[#10B981]'
+                                : sub
+                              }`}>
+                                {cb.status}
+                              </span>
+                              <span className={sub}>{dinheiro(cb.valor)}</span>
+                              <span className={sub}>venc. {dataBr(cb.vencimento)}</span>
+                              {cb.link && (
+                                <a href={cb.link} target="_blank" rel="noopener noreferrer" className="text-[#4A6CF7]">
+                                  ver
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2 shrink-0">
+                      <button
+                        onClick={() => alternarAcesso(a)}
+                        className={`px-3 py-1.5 rounded text-xs font-medium ${
+                          semAcesso ? 'bg-[#10B981] text-white' : 'bg-[#EF4444] text-white'
+                        }`}
+                      >
+                        {semAcesso ? 'Reativar acesso' : 'Bloquear acesso'}
+                      </button>
+                      {a.asaas_subscription_id && (
+                        <button
+                          onClick={() => cancelarNaAsaas(a)}
+                          className={`px-3 py-1.5 rounded border text-xs ${
+                            isDarkMode ? 'border-[#3A3E55] text-[#B0B5C9]' : 'border-[#E4E9F2] text-[#6F7689]'
+                          }`}
+                        >
+                          Cancelar cobrança
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <p className={`text-xs ${sub}`}>
+          <strong>Bloquear acesso</strong> corta o uso do sistema imediatamente, mas NÃO
+          para a cobrança na Asaas. <strong>Cancelar cobrança</strong> encerra a assinatura
+          na Asaas e o cliente deixa de ser cobrado nos próximos ciclos.
+          <strong> Divergente</strong> significa que nosso banco diz ativo, mas há cobrança vencida na Asaas.
+        </p>
+      </div>
+    );
+  };
+
   const renderCuponsScreen = () => {
     const card = isDarkMode ? 'bg-[#2A2E45] border-[#3A3E55]' : 'bg-white border-[#E4E9F2]';
     const txt = isDarkMode ? 'text-white' : 'text-[#2A2E45]';
@@ -2672,6 +2923,8 @@ function RetaguardaDashboardContent() {
         return renderMapScreen();
       case "requests":
         return renderRequestsScreen();
+      case "assinaturas":
+        return renderAssinaturasScreen();
       case "externas":
         return renderExternasScreen();
       case "cupons":
