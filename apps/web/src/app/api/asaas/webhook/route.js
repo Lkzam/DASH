@@ -2,6 +2,31 @@ import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'node:crypto';
 import { duracaoDias, getPlano, TIER_IDS } from '../../../../config/planos.js';
 
+const ASAAS_URL = process.env.ASAAS_API_URL || 'https://api.asaas.com/v3';
+
+/**
+ * Confirma na Asaas que a assinatura é do OpinAI e devolve o tier dela.
+ *
+ * O tier é gravado em `externalReference` quando a assinatura é criada
+ * (ver criar-assinatura). Uma cobrança avulsa, ou de outro produto vendido
+ * pela mesma conta Asaas, não tem esse marcador — e por isso não ativa nada.
+ */
+async function tierDaAssinatura(subscriptionId) {
+  const apiKey = process.env.ASAAS_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const res = await fetch(
+      `${ASAAS_URL}/subscriptions/${encodeURIComponent(String(subscriptionId))}`,
+      { headers: { access_token: apiKey } },
+    );
+    if (!res.ok) return null;
+    const sub = await res.json();
+    return TIER_IDS.includes(sub?.externalReference) ? sub.externalReference : null;
+  } catch {
+    return null;
+  }
+}
+
 // Comparação resistente a timing attacks.
 function timingSafeEqualStr(a, b) {
   const bufA = Buffer.from(String(a));
@@ -74,7 +99,31 @@ export async function POST(request) {
       return json({ error: 'Erro interno ao buscar plano' }, 500);
     }
 
-    let tier = plano?.tier || 'basico';
+    let tier = plano?.tier ?? null;
+
+    // Sem registro no banco, só ativamos se der para PROVAR que o pagamento
+    // veio de uma assinatura do OpinAI.
+    //
+    // Antes, este caminho criava um plano ativo para o e-mail do pagador sem
+    // verificar nada — ou seja, QUALQUER pagamento recebido nesta conta Asaas
+    // (uma cobrança avulsa, outro produto) virava acesso liberado. Em sandbox
+    // era inofensivo; em produção é entrada franca.
+    //
+    // Devolve 200 nos casos ignorados de propósito: 4xx faria a Asaas
+    // reenviar o evento indefinidamente.
+    if (!plano) {
+      if (!subId) {
+        console.warn('[asaas/webhook] pagamento sem assinatura e sem plano — ignorado:', payment.id);
+        return json({ received: true, action: 'ignored_sem_assinatura' }, 200);
+      }
+      const tierDaSub = await tierDaAssinatura(subId);
+      if (!tierDaSub) {
+        console.warn('[asaas/webhook] assinatura sem tier do OpinAI — ignorado:', subId);
+        return json({ received: true, action: 'ignored_sem_tier' }, 200);
+      }
+      tier = tierDaSub;
+    }
+
     if (!TIER_IDS.includes(tier)) tier = 'basico';
     const cota = getPlano(tier)?.cotaPesquisas ?? 0;
 
@@ -106,7 +155,9 @@ export async function POST(request) {
         return json({ error: 'Erro ao ativar plano' }, 500);
       }
     } else {
-      // Sem registro pendente: cria um ativo. Sem e-mail conhecido, usa o do cliente.
+      // Chegou aqui só depois de confirmar o tier na Asaas (acima): a
+      // assinatura existe e é do OpinAI, mas o registro pendente não foi
+      // gravado — provavelmente falha do Supabase durante criar-assinatura.
       const { error: insErr } = await supabaseAdmin.from('planos_usuario').insert({
         email: payment.customerEmail || `asaas_${custId}`,
         created_at: new Date().toISOString(),
