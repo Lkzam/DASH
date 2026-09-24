@@ -66,7 +66,7 @@ export async function POST(request) {
       const cust = await custRes.json();
       if (!custRes.ok || !cust.id) {
         console.error('Erro ao criar cliente Asaas:', cust);
-        return json({ error: 'Erro ao registrar cliente no pagamento.', details: cust }, 502);
+        return json({ error: 'Erro ao registrar cliente no pagamento.' }, 502);
       }
       customerId = cust.id;
     }
@@ -90,7 +90,7 @@ export async function POST(request) {
     const sub = await subRes.json();
     if (!subRes.ok || !sub.id) {
       console.error('Erro ao criar assinatura Asaas:', sub);
-      return json({ error: 'Erro ao gerar a assinatura. Tente novamente.', details: sub }, 502);
+      return json({ error: 'Erro ao gerar a assinatura. Tente novamente.' }, 502);
     }
 
     // 3. Pega o link (invoiceUrl) da primeira cobrança da assinatura.
