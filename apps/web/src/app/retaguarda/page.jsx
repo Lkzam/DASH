@@ -22,7 +22,6 @@ import {
   Coins,
   Newspaper,
   ExternalLink,
-  Lock,
 } from "lucide-react";
 import { useDarkMode } from "../../contexts/DarkModeContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -69,12 +68,6 @@ function RetaguardaDashboardContent() {
     custoMoedas: '', quantidade: '', validade: '',
   });
 
-  // Painel Secret — só o dono do sistema. O gate real é no servidor (404 para
-  // não-dono); aqui é só para não renderizar o item de menu aos outros.
-  const EMAIL_DONO = 'lucamr150405@gmail.com';
-  const ehDono = (user?.email || '').trim().toLowerCase() === EMAIL_DONO;
-  const [secretStatus, setSecretStatus] = useState(null);
-  const [secretMsg, setSecretMsg] = useState('');
 
   // Estados para gestão de assinaturas (banco + Asaas)
   const [assinaturas, setAssinaturas] = useState([]);
@@ -357,58 +350,6 @@ function RetaguardaDashboardContent() {
     if (currentScreen === 'cupons') carregarCupons();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentScreen]);
-
-  // ── Painel Secret (dono) ──────────────────────────────────────────────────
-  const chamarSecret = async (payload) => {
-    const token = await getToken();
-    const res = await fetch('/api/retaguarda/secret', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload),
-    });
-    const dados = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(dados?.error || 'Erro na operação.');
-    return dados;
-  };
-
-  const carregarSecret = async () => {
-    setSecretMsg('');
-    try {
-      setSecretStatus(await chamarSecret({ action: 'status' }));
-    } catch (err) {
-      setSecretMsg(err.message);
-      setSecretStatus(null);
-    }
-  };
-
-  useEffect(() => {
-    if (currentScreen === 'secret' && ehDono) carregarSecret();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentScreen]);
-
-  const alternarSistema = async (ativo) => {
-    const aviso = ativo
-      ? 'Religar o sistema para todos os usuários?'
-      : '⚠️ DESLIGAR O SISTEMA INTEIRO?\n\nTodas as requisições passam a receber "em manutenção" (503). Reversível — você religa aqui. Ninguém consegue usar o site nem o app enquanto estiver desligado.';
-    if (!window.confirm(aviso)) return;
-    try {
-      await chamarSecret({ action: 'set_sistema', ativo });
-      setSecretMsg(ativo ? 'Sistema religado.' : 'Sistema DESLIGADO.');
-      carregarSecret();
-    } catch (err) { setSecretMsg(err.message); }
-  };
-
-  const alternarAsaasNovas = async (ativo) => {
-    const aviso = ativo
-      ? 'Reabrir o cadastro de novas assinaturas?'
-      : 'Suspender NOVAS assinaturas?\n\nAs assinaturas atuais continuam ativas e sendo cobradas. Só quem tentar assinar a partir de agora é barrado. Reversível.';
-    if (!window.confirm(aviso)) return;
-    try {
-      await chamarSecret({ action: 'set_asaas', ativo });
-      setSecretMsg(ativo ? 'Novas assinaturas reabertas.' : 'Novas assinaturas suspensas.');
-      carregarSecret();
-    } catch (err) { setSecretMsg(err.message); }
-  };
 
   // ── Gestão de assinaturas ─────────────────────────────────────────────────
   const chamarAssinaturas = async (payload) => {
@@ -734,12 +675,6 @@ function RetaguardaDashboardContent() {
       label: "Configuração",
       active: currentScreen === "settings",
     },
-    ...(ehDono ? [{
-      id: "secret",
-      icon: Lock,
-      label: "Secret",
-      active: currentScreen === "secret",
-    }] : []),
   ];
 
   const moreItems = [
@@ -2598,96 +2533,6 @@ function RetaguardaDashboardContent() {
     );
   };
 
-  const renderSecretScreen = () => {
-    if (!ehDono) {
-      return (
-        <div className="flex items-center justify-center h-full">
-          <p className={isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]'}>Não encontrado.</p>
-        </div>
-      );
-    }
-    const card = isDarkMode ? 'bg-[#2A2E45] border-[#3A3E55]' : 'bg-white border-[#E4E9F2]';
-    const txt = isDarkMode ? 'text-white' : 'text-[#2A2E45]';
-    const sub = isDarkMode ? 'text-[#B0B5C9]' : 'text-[#6F7689]';
-    const sistemaOn = secretStatus?.sistema_ativo !== false;
-    const asaasOn = secretStatus?.asaas_ativo !== false;
-
-    return (
-      <div className="flex flex-col h-full p-6 space-y-6 overflow-auto">
-        <div>
-          <h1 className={`text-2xl font-semibold ${txt}`}>🔒 Secret</h1>
-          <p className={`text-sm mt-1 ${sub}`}>
-            Painel do proprietário. Freio de mão reversível do sistema. Visível apenas para você.
-          </p>
-        </div>
-
-        <div className="rounded-lg border border-[#F59E0B] bg-[#F59E0B]/10 p-4">
-          <p className="text-sm text-[#F59E0B] leading-relaxed">
-            Estes controles são uma contingência. A proteção jurídica de verdade contra
-            calote é a <strong>cláusula de suspensão por inadimplência no contrato</strong> —
-            desligar o sistema sem respaldo contratual pode se voltar contra você. Tudo aqui
-            é <strong>reversível</strong>: nada é apagado.
-          </p>
-        </div>
-
-        {secretMsg && (
-          <div className={`rounded-lg border p-3 ${card}`}>
-            <p className={`text-sm ${txt}`}>{secretMsg}</p>
-          </div>
-        )}
-
-        {/* Sistema inteiro */}
-        <div className={`rounded-lg border p-5 ${card}`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className={`font-semibold ${txt}`}>Sistema</h3>
-              <p className={`text-sm mt-1 ${sub}`}>
-                {sistemaOn
-                  ? 'No ar. Site e app funcionando normalmente.'
-                  : '🔴 DESLIGADO. Todas as requisições recebem "em manutenção".'}
-              </p>
-            </div>
-            <button
-              onClick={() => alternarSistema(!sistemaOn)}
-              className={`px-4 py-2 rounded text-sm font-medium ${
-                sistemaOn ? 'bg-[#EF4444] text-white' : 'bg-[#10B981] text-white'
-              }`}
-            >
-              {sistemaOn ? 'Desligar sistema' : 'Religar sistema'}
-            </button>
-          </div>
-        </div>
-
-        {/* Novas assinaturas */}
-        <div className={`rounded-lg border p-5 ${card}`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className={`font-semibold ${txt}`}>Novas assinaturas</h3>
-              <p className={`text-sm mt-1 ${sub}`}>
-                {asaasOn
-                  ? 'Abertas. Novos clientes podem assinar.'
-                  : '🟠 Suspensas. As assinaturas atuais seguem ativas; só novos cadastros são barrados.'}
-              </p>
-            </div>
-            <button
-              onClick={() => alternarAsaasNovas(!asaasOn)}
-              className={`px-4 py-2 rounded text-sm font-medium ${
-                asaasOn ? 'bg-[#F59E0B] text-white' : 'bg-[#10B981] text-white'
-              }`}
-            >
-              {asaasOn ? 'Suspender novas' : 'Reabrir'}
-            </button>
-          </div>
-        </div>
-
-        <p className={`text-xs ${sub}`}>
-          Enquanto o sistema está desligado, esta tela continua acessível a você — é a
-          única porta que o modo manutenção não fecha, para você poder religar.
-        </p>
-      </div>
-    );
-  };
-
   const renderAssinaturasScreen = () => {
     const card = isDarkMode ? 'bg-[#2A2E45] border-[#3A3E55]' : 'bg-white border-[#E4E9F2]';
     const txt = isDarkMode ? 'text-white' : 'text-[#2A2E45]';
@@ -3082,8 +2927,6 @@ function RetaguardaDashboardContent() {
         return renderMapScreen();
       case "requests":
         return renderRequestsScreen();
-      case "secret":
-        return renderSecretScreen();
       case "assinaturas":
         return renderAssinaturasScreen();
       case "externas":
