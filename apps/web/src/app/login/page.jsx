@@ -77,6 +77,7 @@ export default function LoginPage() {
 
         {/* Logo/Título */}
         <div className="text-center mb-8">
+          <img src="/logo-branco.png" alt="OpinAI" className="w-20 h-20 mx-auto mb-3" />
           <h1 className="text-4xl font-bold text-white mb-2">OpinAI</h1>
           <p className="text-blue-100">
             {isLogin ? 'Faça login para continuar' : 'Crie sua conta'}

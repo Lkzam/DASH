@@ -98,9 +98,7 @@ export default function LandingPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-md border-b border-gray-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-[#1570FF] rounded-lg flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-white" />
-            </div>
+            <img src="/logo-azul.png" alt="OpinAI" className="w-9 h-9" />
             <span className="font-bold text-xl text-[#2A2E45]">OpinAI</span>
           </div>
 
@@ -400,9 +398,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 bg-[#1570FF] rounded-md flex items-center justify-center">
-                <BarChart3 className="w-4 h-4 text-white" />
-              </div>
+              <img src="/logo-branco.png" alt="OpinAI" className="w-7 h-7" />
               <span className="font-bold text-white">OpinAI</span>
             </div>
             <div className="flex gap-6 text-sm text-gray-500">

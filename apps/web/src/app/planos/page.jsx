@@ -128,9 +128,7 @@ export default function PlanosPage() {
             <span className="text-sm">Voltar</span>
           </button>
           <div className="flex items-center gap-2 ml-4">
-            <div className="w-7 h-7 bg-[#1570FF] rounded-md flex items-center justify-center">
-              <BarChart3 className="w-4 h-4 text-white" />
-            </div>
+            <img src="/logo-azul.png" alt="OpinAI" className="w-7 h-7" />
             <span className="font-bold text-[#2A2E45]">OpinAI</span>
           </div>
         </div>

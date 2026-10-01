@@ -10,9 +10,7 @@ export default function PagamentoSucessoPage() {
         {/* Logo */}
         <div className="flex justify-center mb-8">
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 bg-[#1570FF] rounded-xl flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-white" />
-            </div>
+            <img src="/logo-branco.png" alt="OpinAI" className="w-9 h-9" />
             <span className="font-bold text-xl text-white">OpinAI</span>
           </div>
         </div>
