@@ -3,6 +3,7 @@ import { feature, mesh } from 'topojson-client';
 import { Avatar } from './ui.jsx';
 import { fmtPct } from './formato.js';
 import { liderDe } from './MapaBrasil.jsx';
+import { MAPA_TEMA } from './tema.js';
 
 /**
  * Mapa da apuração em Canvas 2D: 5.570 municípios pintados pela cor do líder,
@@ -14,8 +15,6 @@ import { liderDe } from './MapaBrasil.jsx';
  */
 
 const VERSAO_MALHA = '3';
-const FUNDO = '#0b0b0d';
-const SEM_DADO = '#1f1f25';
 const PASSOS_MARGEM = [10, 25, 45];           // legenda: até 10 · 25 · 45 · mais pontos
 const FATORES = [0.4, 0.6, 0.8, 1];           // margem pequena = mais escuro
 const LATERAIS = ['RN', 'PB', 'PE', 'AL', 'SE', 'ES', 'RJ'];
@@ -28,20 +27,20 @@ const CEL = 25; // célula do índice espacial (unidades do mapa)
 
 // ── cor ─────────────────────────────────────────────────────────────────────
 const cacheCor = new Map();
-function misturar(hex, f) {
-  const chave = hex + f;
+export function misturar(hex, f, fundo = MAPA_TEMA.escuro.fundo) {
+  const chave = hex + f + fundo;
   let c = cacheCor.get(chave);
   if (!c) {
-    const n = parseInt(hex.slice(1), 16), b = parseInt(FUNDO.slice(1), 16);
+    const n = parseInt(hex.slice(1), 16), b = parseInt(fundo.slice(1), 16);
     const mix = (s) => Math.round(((b >> s) & 255) + ((((n >> s) & 255) - ((b >> s) & 255)) * f));
     c = `rgb(${mix(16)},${mix(8)},${mix(0)})`;
     cacheCor.set(chave, c);
   }
   return c;
 }
-export function corPorMargem(hex, margem) {
+export function corPorMargem(hex, margem, fundo) {
   const i = margem < PASSOS_MARGEM[0] ? 0 : margem < PASSOS_MARGEM[1] ? 1 : margem < PASSOS_MARGEM[2] ? 2 : 3;
-  return misturar(hex || '#4B5563', FATORES[i]);
+  return misturar(hex || '#4B5563', FATORES[i], fundo);
 }
 export const ESCALA_LEGENDA = FATORES;
 
@@ -85,8 +84,11 @@ const easing = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 // ═════════════════════════════════════════════════════════════════════════════
 export default function MapaMunicipios({
   dadosUF, resumo, info, mapaCand, modo = 'municipios', candidatoFiltro,
-  ufSel, munSel, onSelecionar,
+  ufSel, munSel, onSelecionar, tema = 'escuro',
 }) {
+  const T = MAPA_TEMA[tema] || MAPA_TEMA.escuro;
+  const temaRef = useRef(T);
+  temaRef.current = T;
   const caixaRef = useRef(null);
   const canvasRef = useRef(null);
   const baseRef = useRef(null);      // camada-base (preenchimentos + divisas) em cache
@@ -164,28 +166,30 @@ export default function MapaMunicipios({
     const corUF = {};
     for (const [uf, d] of Object.entries(dadosUF || {})) {
       const l = liderDe(d, mapaCand);
-      corUF[uf] = l ? corPorMargem(l.cand?.cor, l.margem) : SEM_DADO;
+      corUF[uf] = l ? corPorMargem(l.cand?.cor, l.margem, T.fundo) : T.semDado;
     }
     return G.feats.map((f) => {
       const r = resumo?.[f.id];
-      if (modo === 'estados' || !resumo) return corUF[f.uf] || SEM_DADO;
-      if (!r || !r[5]) return SEM_DADO;
-      if (modo === 'apurado') return misturar('#E8E8EA', Math.max(0.12, r[0] / 100));
+      if (modo === 'estados' || !resumo) return corUF[f.uf] || T.semDado;
+      if (!r || !r[5]) return T.semDado;
+      if (modo === 'apurado') return misturar(T.neutro, Math.max(0.12, r[0] / 100), T.fundo);
       if (modo === 'candidato') {
         const v = r[1] === candidatoFiltro ? r[2] : r[3] === candidatoFiltro ? r[4] : 0;
         const share = v / r[5];
-        return misturar(mapaCand[candidatoFiltro]?.cor || '#4B5563', Math.min(1, 0.15 + share * 1.2));
+        return misturar(mapaCand[candidatoFiltro]?.cor || '#4B5563', Math.min(1, 0.15 + share * 1.2), T.fundo);
       }
-      if (modo === 'vantagem') return misturar('#E8E8EA', Math.min(1, 0.12 + ((r[2] - r[4]) / r[5]) * 1.6));
-      return corPorMargem(mapaCand[r[1]]?.cor, ((r[2] - r[4]) / r[5]) * 100);
+      if (modo === 'vantagem') return misturar(T.neutro, Math.min(1, 0.12 + ((r[2] - r[4]) / r[5]) * 1.6), T.fundo);
+      return corPorMargem(mapaCand[r[1]]?.cor, ((r[2] - r[4]) / r[5]) * 100, T.fundo);
     });
-  }, [pronto, resumo, dadosUF, mapaCand, modo, candidatoFiltro]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pronto, resumo, dadosUF, mapaCand, modo, candidatoFiltro, tema]);
   coresRef.current = cores;
 
   // ── desenho ───────────────────────────────────────────────────────────────
   const desenharBase = useCallback(() => {
     const G = geo.current, cv = canvasRef.current, base = baseRef.current, cores = coresRef.current;
     const { ufSel } = selRef.current;
+    const T = temaRef.current;
     if (!G || !cv || !base || !cores) return;
     const dpr = window.devicePixelRatio || 1;
     const { k, x, y } = vista.current;
@@ -195,18 +199,18 @@ export default function MapaMunicipios({
     ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * x, dpr * y);
     for (let i = 0; i < G.feats.length; i++) { ctx.fillStyle = cores[i]; ctx.fill(G.feats[i].path, 'evenodd'); }
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(11,11,13,0.42)'; ctx.lineWidth = 0.32 / k; ctx.stroke(G.bordasMun);
+    ctx.strokeStyle = T.bordaMun; ctx.lineWidth = 0.32 / k; ctx.stroke(G.bordasMun);
     if (ufSel && G.bboxUF[ufSel]) {
       // Esmaece o resto do país e repinta só a UF escolhida.
-      ctx.fillStyle = 'rgba(11,11,13,0.66)'; ctx.fillRect(-2000, -2000, 5000, 5000);
+      ctx.fillStyle = T.esmaecer; ctx.fillRect(-2000, -2000, 5000, 5000);
       for (let i = 0; i < G.feats.length; i++) {
         if (G.feats[i].uf !== ufSel) continue;
         ctx.fillStyle = cores[i]; ctx.fill(G.feats[i].path, 'evenodd');
       }
-      ctx.strokeStyle = 'rgba(11,11,13,0.5)'; ctx.lineWidth = 0.32 / k; ctx.stroke(G.bordasMun);
+      ctx.strokeStyle = T.bordaMun; ctx.lineWidth = 0.32 / k; ctx.stroke(G.bordasMun);
     }
-    ctx.strokeStyle = 'rgba(0,0,0,0.92)'; ctx.lineWidth = 1.2 / k; ctx.stroke(G.bordasUF);
-    if (ufSel && G.bboxUF[ufSel]) { ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.6 / k; ctx.stroke(G.contorno(ufSel)); }
+    ctx.strokeStyle = T.bordaUF; ctx.lineWidth = 1.2 / k; ctx.stroke(G.bordasUF);
+    if (ufSel && G.bboxUF[ufSel]) { ctx.strokeStyle = T.contorno; ctx.lineWidth = 1.6 / k; ctx.stroke(G.contorno(ufSel)); }
   }, []);
 
   const compor = useCallback((alfaNovo = 1) => {
@@ -223,7 +227,7 @@ export default function MapaMunicipios({
     const { k, x, y } = vista.current;
     ctx.setTransform(dpr * k, 0, 0, dpr * k, dpr * x, dpr * y);
     ctx.lineJoin = 'round';
-    const contornar = (idx, w) => { if (idx >= 0) { ctx.strokeStyle = '#fff'; ctx.lineWidth = w / k; ctx.stroke(G.feats[idx].path); } };
+    const contornar = (idx, w) => { if (idx >= 0) { ctx.strokeStyle = temaRef.current.destaque; ctx.lineWidth = w / k; ctx.stroke(G.feats[idx].path); } };
     contornar(munSel ? G.porId.get(munSel) ?? -1 : -1, 2.4);
     contornar(hoverRef.current, 1.8);
   }, []);
@@ -402,7 +406,7 @@ export default function MapaMunicipios({
   }, [pronto]);
 
   // ── camadas HTML (rótulos, pílulas, tooltip) ──────────────────────────────
-  if (erro) return <div className="p-6 text-sm text-[#9CA3AF]">Não foi possível carregar o mapa.</div>;
+  if (erro) return <div className="p-6 text-sm text-[var(--ap-mudo)]">Não foi possível carregar o mapa.</div>;
 
   const G = geo.current;
   const { k, x, y } = vista.current;
@@ -443,7 +447,7 @@ export default function MapaMunicipios({
 
   return (
     <div ref={caixaRef} className="relative w-full h-full select-none overflow-hidden">
-      {!pronto && <div className="absolute inset-0 flex items-center justify-center text-sm text-[#6B7280] animate-pulse">Carregando mapa…</div>}
+      {!pronto && <div className="absolute inset-0 flex items-center justify-center text-sm text-[var(--ap-mudo2)] animate-pulse">Carregando mapa…</div>}
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full touch-none"
@@ -459,7 +463,7 @@ export default function MapaMunicipios({
       {pilulas.length > 0 && (
         <svg className="absolute inset-0 w-full h-full pointer-events-none">
           {pilulas.map((p) => (
-            <line key={p.u.uf} x1={p.sx} y1={p.sy} x2={p.px} y2={p.py + 11} stroke="rgba(255,255,255,0.28)" strokeWidth="1" />
+            <line key={p.u.uf} x1={p.sx} y1={p.sy} x2={p.px} y2={p.py + 11} stroke={T.linha} strokeWidth="1" />
           ))}
         </svg>
       )}
@@ -505,7 +509,7 @@ export default function MapaMunicipios({
       {/* zoom */}
       <div className="absolute left-3 bottom-3 flex flex-col gap-1">
         {[['+', 1.6], ['−', 1 / 1.6]].map(([t, f]) => (
-          <button key={t} onClick={() => zoomEm(tam.current.w / 2, tam.current.h / 2, f)} className="w-8 h-8 rounded-md bg-[#17171c] border border-[#26262c] text-white text-lg leading-none hover:bg-[#202027]" aria-label={t === '+' ? 'Aproximar' : 'Afastar'}>{t}</button>
+          <button key={t} onClick={() => zoomEm(tam.current.w / 2, tam.current.h / 2, f)} className="w-8 h-8 rounded-md bg-[var(--ap-elev)] border border-[var(--ap-borda2)] text-[var(--ap-txt)] text-lg leading-none hover:bg-[var(--ap-elev2)]" aria-label={t === '+' ? 'Aproximar' : 'Afastar'}>{t}</button>
         ))}
       </div>
 
@@ -532,12 +536,12 @@ function Tooltip({ f, sx, sy, resumo, info, dadosUF, mapaCand, tam }) {
   const left = sx + 18 + W > tam.w ? sx - W - 14 : sx + 18;
   const top = Math.max(8, Math.min(sy + 14, tam.h - H - 8));
   return (
-    <div className="absolute pointer-events-none z-10 rounded-xl border border-[#2a2a31] bg-[#141418]/95 backdrop-blur p-3 shadow-2xl" style={{ left, top, width: W }}>
+    <div className="absolute pointer-events-none z-10 rounded-xl border border-[var(--ap-borda2)] bg-[var(--ap-tooltip)] backdrop-blur p-3 shadow-2xl" style={{ left, top, width: W }}>
       <div className="flex items-start gap-2">
-        <span className="px-1.5 py-0.5 rounded bg-[#26262c] text-[10px] font-semibold text-[#C9C9D1]">{f.uf}</span>
+        <span className="px-1.5 py-0.5 rounded bg-[var(--ap-elev2)] text-[10px] font-semibold text-[var(--ap-txt2)]">{f.uf}</span>
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-white truncate">{nome || f.uf}</div>
-          {pctSecoes != null && <div className="text-[11px] text-[#8b8b95] tabular-nums">{fmtPct(pctSecoes, pctSecoes >= 100 ? 0 : 1)} das seções</div>}
+          <div className="text-sm font-semibold text-[var(--ap-forte)] truncate">{nome || f.uf}</div>
+          {pctSecoes != null && <div className="text-[11px] text-[var(--ap-mudo)] tabular-nums">{fmtPct(pctSecoes, pctSecoes >= 100 ? 0 : 1)} das seções</div>}
         </div>
       </div>
       <div className="mt-2.5 space-y-2">
@@ -545,13 +549,13 @@ function Tooltip({ f, sx, sy, resumo, info, dadosUF, mapaCand, tam }) {
           <div key={i} className="flex items-center gap-2">
             <Avatar cand={cand} tamanho={30} />
             <div className="flex-1 min-w-0">
-              <div className="text-[13px] text-white truncate">{cand.nome}</div>
+              <div className="text-[13px] text-[var(--ap-forte)] truncate">{cand.nome}</div>
               <div className="text-[10px] font-semibold" style={{ color: cand.cor }}>{cand.partido} {cand.numero}</div>
             </div>
-            <div className="text-[13px] font-semibold text-white tabular-nums">{fmtPct(pct, 1)}</div>
+            <div className="text-[13px] font-semibold text-[var(--ap-forte)] tabular-nums">{fmtPct(pct, 1)}</div>
           </div>
         ))}
-        {linhas.length === 0 && <div className="text-xs text-[#6c6c76]">Aguardando resultados</div>}
+        {linhas.length === 0 && <div className="text-xs text-[var(--ap-mudo2)]">Aguardando resultados</div>}
       </div>
     </div>
   );

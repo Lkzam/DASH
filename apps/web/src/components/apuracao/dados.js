@@ -21,6 +21,8 @@ export function criarFonteDados(opts = {}) {
   let munInfo = null;     // ibge → [nome, UF, capital]
   let munResumo = null;   // ibge → [% seções, 1º, votos, 2º, votos, total]
   let munSeq = -1;
+  let estadual = null;    // Governador/Senado/Deputados (estadual.json)
+  let estSeq = -1;
 
   const pctDe = (br) => (br?.secoes ? (br.totalizadas / br.secoes) * 100 : 0);
   const notificar = (payload) => { for (const cb of subs) cb(payload); };
@@ -29,6 +31,7 @@ export function criarFonteDados(opts = {}) {
       agora, cadastro, status,
       historico: { versao: 1, seq, pontos: [...pontos] },
       municipios: { info: munInfo, resumo: munResumo },
+      estadual,
     });
 
   // ───────────────────────── SIMULAÇÃO ─────────────────────────
@@ -74,14 +77,20 @@ export function criarFonteDados(opts = {}) {
       return;
     }
     try {
-      if (!cadastro) cadastro = await buscar(`${FEED}/candidatos.json`);
-      // Municípios são acessórios: se faltarem, o mapa cai para a cor por estado.
-      if (!munInfo) { try { munInfo = (await buscar(`${FEED}/municipios-info.json`)).m; } catch { /* ok */ } }
-      try {
-        const r = await buscar(`${FEED}/municipios-resumo.json`);
-        if (typeof r?.seq === 'number' && r.seq !== munSeq) { munSeq = r.seq; munResumo = r.m; }
-      } catch { /* ok */ }
-      const agora = await buscar(`${FEED}/agora.json`);
+      // Tudo em paralelo; só agora.json (e o cadastro, na 1ª vez) é obrigatório.
+      // Municípios e estadual são acessórios: se faltarem, o resto segue.
+      const opcional = (p) => p.catch(() => null);
+      const [cad, info, resumo, est, agora] = await Promise.all([
+        cadastro ? null : buscar(`${FEED}/candidatos.json`),
+        munInfo ? null : opcional(buscar(`${FEED}/municipios-info.json`)),
+        opcional(buscar(`${FEED}/municipios-resumo.json`)),
+        opcional(buscar(`${FEED}/estadual.json`)),
+        buscar(`${FEED}/agora.json`),
+      ]);
+      if (cad) cadastro = cad;
+      if (info?.m) munInfo = info.m;
+      if (typeof resumo?.seq === 'number' && resumo.seq !== munSeq) { munSeq = resumo.seq; munResumo = resumo.m; }
+      if (typeof est?.seq === 'number' && est.seq !== estSeq) { estSeq = est.seq; estadual = est; }
       // Só aceita snapshot igual/mais novo: ignora cache velho do CDN.
       if (typeof agora?.seq === 'number' && agora.seq >= seq) {
         const mudou = agora.seq > seq || pontos.length === 0;

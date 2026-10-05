@@ -34,9 +34,9 @@ import { supabase } from "../../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
 
 function DashboardContent() {
-  // Link compartilhado da apuração (#presidente, #presidente-ba…) abre direto nela.
+  // Link compartilhado da apuração (#presidente, #senado-ba…) abre direto nela.
   const [currentScreen, setCurrentScreen] = useState(() =>
-    typeof window !== "undefined" && /^#presidente/.test(window.location.hash) ? "elections" : "home"
+    typeof window !== "undefined" && /^#(presidente|governadores|senado|deputados)/.test(window.location.hash) ? "elections" : "home"
   );
   const [selectedRound, setSelectedRound] = useState(1);
   const { isDarkMode, toggleDarkMode } = useDarkMode();
@@ -1862,7 +1862,7 @@ function DashboardContent() {
       case "home":
         return renderHomeScreen();
       case "elections":
-        return <ApuracaoScreen />;
+        return <ApuracaoScreen escuro={isDarkMode} />;
       case "map":
         return <AnaliseEleitoral />;
       case "search":
