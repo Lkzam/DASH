@@ -25,7 +25,27 @@ const UF = {
 };
 
 const W = 1000, H = 1000, PAD = 24;
-const geo = JSON.parse(readFileSync(new URL('./uf-raw.json', import.meta.url)));
+
+// O d3-geo trabalha na esfera e exige anel EXTERNO no sentido horário (e furos
+// no anti-horário) — o contrário da RFC 7946, que é como o IBGE entrega. Sem
+// reorientar, cada UF vira "o planeta inteiro menos a UF": o mapa sai como um
+// retângulo cheio e todos os centroides caem no meio. Área > 0 = anti-horário.
+const area = (r) => {
+  let s = 0;
+  for (let i = 0; i < r.length - 1; i++) s += r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1];
+  return s / 2;
+};
+const rewindPoly = (rings) => rings.map((r, i) => {
+  const a = area(r);
+  return (i === 0 ? a > 0 : a < 0) ? r.slice().reverse() : r;
+});
+const rewind = (g) =>
+  g.type === 'Polygon' ? { ...g, coordinates: rewindPoly(g.coordinates) }
+  : g.type === 'MultiPolygon' ? { ...g, coordinates: g.coordinates.map(rewindPoly) }
+  : g;
+
+const bruto = JSON.parse(readFileSync(new URL('./uf-raw.json', import.meta.url)));
+const geo = { ...bruto, features: bruto.features.map((f) => ({ ...f, geometry: rewind(f.geometry) })) };
 const proj = geoMercator().fitExtent([[PAD, PAD], [W - PAD, H - PAD]], geo);
 const path = geoPath(proj);
 

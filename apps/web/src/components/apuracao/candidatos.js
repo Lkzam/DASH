@@ -24,7 +24,7 @@ export function mapaCandidatos(cargo = 'presidente') {
 
 export const COR_NEUTRA = '#4B5563';
 
-export const REGIOES = ['Norte', 'Nordeste', 'Centro-Oeste', 'Sudeste', 'Sul'];
+export const REGIOES = ['Norte', 'Nordeste', 'Centro-Oeste', 'Sudeste', 'Sul', 'Exterior'];
 
 export const UF_REGIAO = {
   RO: 'Norte', AC: 'Norte', AM: 'Norte', RR: 'Norte', PA: 'Norte', AP: 'Norte', TO: 'Norte',
@@ -33,6 +33,7 @@ export const UF_REGIAO = {
   MG: 'Sudeste', ES: 'Sudeste', RJ: 'Sudeste', SP: 'Sudeste',
   PR: 'Sul', SC: 'Sul', RS: 'Sul',
   MS: 'Centro-Oeste', MT: 'Centro-Oeste', GO: 'Centro-Oeste', DF: 'Centro-Oeste',
+  ZZ: 'Exterior',
 };
 
 export const UF_NOME = {
@@ -41,7 +42,7 @@ export const UF_NOME = {
   PB: 'Paraíba', PE: 'Pernambuco', AL: 'Alagoas', SE: 'Sergipe', BA: 'Bahia',
   MG: 'Minas Gerais', ES: 'Espírito Santo', RJ: 'Rio de Janeiro', SP: 'São Paulo',
   PR: 'Paraná', SC: 'Santa Catarina', RS: 'Rio Grande do Sul', MS: 'Mato Grosso do Sul',
-  MT: 'Mato Grosso', GO: 'Goiás', DF: 'Distrito Federal',
+  MT: 'Mato Grosso', GO: 'Goiás', DF: 'Distrito Federal', ZZ: 'Exterior',
 };
 
 // Eleitorado aproximado por UF (em milhares) — base para a simulação e para o

@@ -1,38 +1,28 @@
 // Fonte de dados da Apuração. Duas origens, mesma interface `assinar(cb)`:
-//   • SIMULAÇÃO: gera a apuração localmente (sem backend) — preview/demonstração.
-//   • REAL: polling resiliente dos JSON estáticos em /feed (coletor no VPS).
-// O componente não sabe qual é — só recebe { agora, historico, status }.
+//   • REAL (padrão): polling resiliente dos JSON estáticos em /feed, publicados
+//     pelo coletor (collector/coletor.mjs) a partir do TSE.
+//   • SIMULAÇÃO (?sim=1): gera uma apuração fictícia localmente — demonstração.
+// O componente não sabe qual é: recebe { agora, historico, cadastro, status }.
 import { snapshotSimulado } from './simulacao.js';
+import { CANDIDATOS } from './candidatos.js';
 
 const FEED = '/feed';
 
-function montarHistorico(seq, pontos) {
-  return { versao: 1, seq, pontos };
-}
-
 export function criarFonteDados(opts = {}) {
   const sim = opts.sim ?? false;
-  const duracaoMs = opts.duracaoMs ?? 180_000; // 3 min do 0% ao 100% na simulação
+  const duracaoMs = opts.duracaoMs ?? 180_000;
   const subs = new Set();
-  const pontos = [];
+  let pontos = [];
   let seq = 0;
+  let cadastro = sim ? { candidatos: CANDIDATOS.presidente, data2t: '25 de outubro' } : null;
   let parado = false;
   let timer = null;
   let backoff = 5000;
 
-  const emitir = (agora, status) => {
-    for (const cb of subs) cb({ agora, historico: montarHistorico(seq, pontos), status });
-  };
   const pctDe = (br) => (br?.secoes ? (br.totalizadas / br.secoes) * 100 : 0);
-
-  function registrarPonto(agora) {
-    const br = agora.presidente.br;
-    pontos.push({
-      t: agora.gerado, totalizadas: br.totalizadas, secoes: br.secoes,
-      votos: { '13': br.votos['13'] ?? 0, '22': br.votos['22'] ?? 0 }, situacao: br.situacao,
-    });
-    if (pontos.length > 600) pontos.shift();
-  }
+  const notificar = (payload) => { for (const cb of subs) cb(payload); };
+  const emitir = (agora, status) =>
+    notificar({ agora, cadastro, historico: { versao: 1, seq, pontos: [...pontos] }, status });
 
   // ───────────────────────── SIMULAÇÃO ─────────────────────────
   function iniciarSim() {
@@ -43,8 +33,10 @@ export function criarFonteDados(opts = {}) {
       const agora = snapshotSimulado(p);
       seq += 1;
       agora.seq = seq;
-      registrarPonto(agora);
-      emitir(agora, { modo: 'sim', estado: 'ao-vivo', gerado: agora.gerado, pctSecoes: pctDe(agora.presidente.br) });
+      const br = agora.presidente.br;
+      pontos.push({ t: agora.gerado, totalizadas: br.totalizadas, secoes: br.secoes, votos: { ...br.votos }, situacao: br.situacao });
+      if (pontos.length > 600) pontos.shift();
+      emitir(agora, { modo: 'sim', estado: 'ao-vivo', gerado: agora.gerado, pctSecoes: pctDe(br) });
       if (p >= 1 && timer) { clearInterval(timer); timer = null; }
     };
     tick();
@@ -59,45 +51,59 @@ export function criarFonteDados(opts = {}) {
       const res = await fetch(url, { cache: 'no-cache', signal: ctrl.signal });
       if (res.status === 429 || res.status === 503) {
         const ra = Number(res.headers.get('Retry-After'));
-        throw Object.assign(new Error('rate'), { retryAfter: Number.isFinite(ra) ? ra * 1000 : null });
+        throw Object.assign(new Error('limite'), { retryAfter: Number.isFinite(ra) && ra > 0 ? ra * 1000 : null });
       }
-      if (!res.ok) throw new Error('http ' + res.status);
+      if (!res.ok) throw Object.assign(new Error('http ' + res.status), { status: res.status });
       return await res.json();
     } finally {
       clearTimeout(to);
     }
   }
+
   async function cicloReal() {
     if (parado) return;
-    if (document.visibilityState === 'hidden') { agendarReal(15_000); return; }
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      agendar(15_000);
+      return;
+    }
     try {
+      if (!cadastro) cadastro = await buscar(`${FEED}/candidatos.json`);
       const agora = await buscar(`${FEED}/agora.json`);
+      // Só aceita snapshot igual/mais novo: ignora cache velho do CDN.
       if (typeof agora?.seq === 'number' && agora.seq >= seq) {
+        const mudou = agora.seq > seq || pontos.length === 0;
         seq = agora.seq;
-        try { const h = await buscar(`${FEED}/historico.json`); if (h?.pontos) { pontos.length = 0; pontos.push(...h.pontos); } } catch {}
-        emitir(agora, { modo: 'real', estado: 'ao-vivo', gerado: agora.gerado, pctSecoes: pctDe(agora.presidente.br) });
+        if (mudou) {
+          try {
+            const h = await buscar(`${FEED}/historico.json`);
+            if (Array.isArray(h?.pontos)) pontos = h.pontos;
+          } catch { /* histórico é acessório */ }
+        }
+        emitir(agora, { modo: 'real', estado: 'ao-vivo', gerado: agora.gerado, pctSecoes: pctDe(agora.presidente?.br) });
         if (agora.recarregar && opts.build && agora.recarregar !== opts.build) {
           setTimeout(() => location.reload(), 2000 + Math.random() * 58_000);
         }
       }
       backoff = 5000;
-      const jitter = 1 + (Math.random() * 0.4 - 0.2);
-      agendarReal(15_000 * jitter);
+      agendar(15_000 * (1 + (Math.random() * 0.4 - 0.2))); // 15s ±20%
     } catch (e) {
-      for (const cb of subs) cb({ status: { modo: 'real', estado: 'reconectando' } });
+      const semFeed = e?.status === 404;
+      notificar({ status: { modo: 'real', estado: semFeed ? 'sem-feed' : 'reconectando' } });
       const espera = e?.retryAfter ?? backoff;
-      backoff = Math.min(backoff * 2, 30_000);
-      agendarReal(espera);
+      backoff = Math.min(backoff * 2, 30_000); // 5s → 30s
+      agendar(espera);
     }
   }
-  function agendarReal(ms) {
+  function agendar(ms) {
     if (parado) return;
+    clearTimeout(timer);
     timer = setTimeout(cicloReal, ms);
   }
 
-  // ───────────────────────── visibilidade ──────────────────────
-  const onVisible = () => { if (!parado && !sim && document.visibilityState === 'visible') { clearTimeout(timer); cicloReal(); } };
-  const onOnline = () => { if (!parado && !sim) { clearTimeout(timer); cicloReal(); } };
+  // ───────────────────────── visibilidade / rede ───────────────
+  const retomar = () => {
+    if (!parado && !sim && document.visibilityState === 'visible') { clearTimeout(timer); cicloReal(); }
+  };
 
   return {
     assinar(cb) {
@@ -105,8 +111,8 @@ export function criarFonteDados(opts = {}) {
       if (subs.size === 1) {
         if (sim) iniciarSim();
         else {
-          document.addEventListener('visibilitychange', onVisible);
-          window.addEventListener('online', onOnline);
+          document.addEventListener('visibilitychange', retomar);
+          window.addEventListener('online', retomar);
           cicloReal();
         }
       }
@@ -114,9 +120,13 @@ export function criarFonteDados(opts = {}) {
     },
     parar() {
       parado = true;
-      if (timer) { clearInterval(timer); clearTimeout(timer); timer = null; }
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('online', onOnline);
+      clearInterval(timer);
+      clearTimeout(timer);
+      timer = null;
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', retomar);
+        window.removeEventListener('online', retomar);
+      }
     },
   };
 }
