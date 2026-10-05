@@ -25,6 +25,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import ElectionChart from "../../components/ElectionChart";
 import AnaliseEleitoral from "../../components/AnaliseEleitoral";
+import ApuracaoScreen from "../../components/apuracao/ApuracaoScreen";
 import { useDarkMode } from "../../contexts/DarkModeContext";
 import { useAuth } from "../../contexts/AuthContext";
 import ProtectedRoute from "../../components/ProtectedRoute";
@@ -500,7 +501,7 @@ function DashboardContent() {
     {
       id: "elections",
       icon: BarChart3,
-      label: "Eleições 2022",
+      label: "Apuração de Votos",
       active: currentScreen === "elections",
     },
     {
@@ -1858,7 +1859,7 @@ function DashboardContent() {
       case "home":
         return renderHomeScreen();
       case "elections":
-        return renderElectionsScreen();
+        return <ApuracaoScreen />;
       case "map":
         return <AnaliseEleitoral />;
       case "search":
