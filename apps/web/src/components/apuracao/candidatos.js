@@ -6,8 +6,8 @@
 
 export const CANDIDATOS = {
   presidente: [
-    { numero: '13', nome: 'Helena Prado',  partido: 'PT',   cor: '#E13223' },
-    { numero: '22', nome: 'Marco Vieira',  partido: 'PL',   cor: '#1B3A8B' },
+    { numero: '13', nome: 'Helena Prado',  partido: 'PT',   cor: '#E5372B' },
+    { numero: '22', nome: 'Marco Vieira',  partido: 'PL',   cor: '#3A5FE0' },
     { numero: '12', nome: 'Rafael Dias',   partido: 'PDT',  cor: '#13A3B8' },
     { numero: '15', nome: 'Sofia Mendes',  partido: 'MDB',  cor: '#2E9E5B' },
     { numero: '50', nome: 'Caio Nunes',    partido: 'PSOL', cor: '#C9227A' },

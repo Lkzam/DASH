@@ -18,11 +18,18 @@ export function criarFonteDados(opts = {}) {
   let parado = false;
   let timer = null;
   let backoff = 5000;
+  let munInfo = null;     // ibge → [nome, UF, capital]
+  let munResumo = null;   // ibge → [% seções, 1º, votos, 2º, votos, total]
+  let munSeq = -1;
 
   const pctDe = (br) => (br?.secoes ? (br.totalizadas / br.secoes) * 100 : 0);
   const notificar = (payload) => { for (const cb of subs) cb(payload); };
   const emitir = (agora, status) =>
-    notificar({ agora, cadastro, historico: { versao: 1, seq, pontos: [...pontos] }, status });
+    notificar({
+      agora, cadastro, status,
+      historico: { versao: 1, seq, pontos: [...pontos] },
+      municipios: { info: munInfo, resumo: munResumo },
+    });
 
   // ───────────────────────── SIMULAÇÃO ─────────────────────────
   function iniciarSim() {
@@ -68,6 +75,12 @@ export function criarFonteDados(opts = {}) {
     }
     try {
       if (!cadastro) cadastro = await buscar(`${FEED}/candidatos.json`);
+      // Municípios são acessórios: se faltarem, o mapa cai para a cor por estado.
+      if (!munInfo) { try { munInfo = (await buscar(`${FEED}/municipios-info.json`)).m; } catch { /* ok */ } }
+      try {
+        const r = await buscar(`${FEED}/municipios-resumo.json`);
+        if (typeof r?.seq === 'number' && r.seq !== munSeq) { munSeq = r.seq; munResumo = r.m; }
+      } catch { /* ok */ }
       const agora = await buscar(`${FEED}/agora.json`);
       // Só aceita snapshot igual/mais novo: ignora cache velho do CDN.
       if (typeof agora?.seq === 'number' && agora.seq >= seq) {

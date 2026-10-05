@@ -19,6 +19,17 @@
  *   FEED_DIR      ./public/feed   (produção: /var/www/opinai/feed)
  *   COLETOR_INTERVALO_MS  10000
  *   DATA_2T       "25 de outubro"
+ *   COLETOR_MUN_INTERVALO_MS  30000   (ciclo dos municípios)
+ *   COLETOR_CONCORRENCIA      12      (downloads simultâneos de municípios)
+ *
+ * Arquivos publicados em FEED_DIR:
+ *   agora.json               resultado nacional + por UF (seq/gerado)
+ *   historico.json           pontos para o gráfico "Ao longo da apuração"
+ *   candidatos.json          cadastro (nome, partido, cor, foto)
+ *   fotos/<número>.jpeg      fotos oficiais dos candidatos
+ *   municipios-info.json     código IBGE → [nome, UF, capital]
+ *   municipios-resumo.json   código IBGE → [% seções, 1º, votos, 2º, votos, total]
+ *   municipios/<UF>.json     resultado completo dos municípios da UF
  */
 import { writeFile, rename, mkdir, readFile, access } from 'node:fs/promises';
 import path from 'node:path';
@@ -31,6 +42,8 @@ const FEED = path.resolve(process.env.FEED_DIR || 'public/feed');
 const INTERVALO = Number(process.env.COLETOR_INTERVALO_MS || 10_000);
 const DATA_2T = process.env.DATA_2T || '25 de outubro';
 const UMA_VEZ = process.argv.includes('--uma-vez');
+const MUN_INTERVALO = Number(process.env.COLETOR_MUN_INTERVALO_MS || 30_000);
+const CONCORRENCIA = Number(process.env.COLETOR_CONCORRENCIA || 12);
 
 const E6 = String(ELEICAO).padStart(6, '0');
 const UFS = ['ac','al','am','ap','ba','ce','df','es','go','ma','mg','ms','mt','pa','pb','pe',
@@ -38,7 +51,7 @@ const UFS = ['ac','al','am','ap','ba','ce','df','es','go','ma','mg','ms','mt','p
 
 // Cores por partido (tokens). Partido sem cor cai no neutro.
 const COR_PARTIDO = {
-  PT: '#E13223', PL: '#1B3A8B', AVANTE: '#E0900B', 'MISSÃO': '#7C3AED', PSD: '#0E9F6E',
+  PT: '#E5372B', PL: '#3A5FE0', AVANTE: '#E0900B', 'MISSÃO': '#7C3AED', PSD: '#0E9F6E',
   NOVO: '#F97316', UP: '#B4232A', PSTU: '#8B1A1A', DC: '#0EA5E9', PCB: '#C2410C',
   DEMOCRATA: '#2563EB', PCO: '#6B1D1D', MDB: '#2E9E5B', PSDB: '#1E66D0', PSB: '#E0900B',
   PDT: '#13A3B8', PSOL: '#C9227A', REDE: '#16A34A', PP: '#3B82F6', UNIÃO: '#0B4BA8',
@@ -48,6 +61,9 @@ const COR_NEUTRA = '#4B5563';
 
 const urlUnidade = (uf) => `${BASE}/${CICLO}/${ELEICAO}/dados/${uf}/${uf}-c0001-e${E6}-u.json`;
 const urlFoto = (sq) => `${BASE}/${CICLO}/${ELEICAO}/fotos/br/${sq}.jpeg`;
+const urlAbrangencia = (uf) => `${BASE}/${CICLO}/${ELEICAO}/dados/${uf}/${uf}-e${E6}-ab.json`;
+const urlMunicipio = (uf, tse) => `${BASE}/${CICLO}/${ELEICAO}/dados/${uf}/${uf}${tse}-c0001-e${E6}-u.json`;
+const urlConfigMun = () => `${BASE}/${CICLO}/${ELEICAO}/config/mun-e${E6}-cm.json`;
 
 // ── HTTP com ETag (If-None-Match) ───────────────────────────────────────────
 const cacheHttp = new Map(); // url → { etag, json }
@@ -206,16 +222,111 @@ async function ciclo() {
   console.log(`[coletor] publicado seq=${seq} · ${pct}% das seções · ${br.situacao} · ${Date.now() - t0}ms`);
 }
 
+// ── Municípios ──────────────────────────────────────────────────────────────
+// O TSE usa códigos de município próprios; a config da eleição traz a
+// correspondência TSE ↔ IBGE (o mapa usa o código IBGE).
+const infoMun = new Map();      // "ba|30007" → { ibge, nome, uf, capital }
+const assinaturaMun = new Map(); // "ba|30007" → "<seções totalizadas>|<hora>"
+const resultadoMun = new Map();  // ibge → resultado normalizado (+ uf)
+let seqMun = 0;
+
+async function carregarConfigMun() {
+  const cfg = await buscarJSON(urlConfigMun());
+  const info = {};
+  for (const u of cfg.abr ?? []) {
+    const uf = String(u.cd).toLowerCase();
+    if (uf === 'zz') continue; // exterior: cidades estrangeiras, sem malha
+    for (const m of u.mu ?? []) {
+      const reg = { ibge: String(m.cdi), nome: tituloCase(m.nm), uf: uf.toUpperCase(), capital: m.c === 's' };
+      infoMun.set(`${uf}|${m.cd}`, reg);
+      info[reg.ibge] = [reg.nome, reg.uf, reg.capital ? 1 : 0];
+    }
+  }
+  await gravarAtomico('municipios-info.json', { versao: 1, m: info });
+  console.log(`[coletor] config municipal: ${infoMun.size} municípios`);
+}
+
+/** Executa `tarefas` (funções async) com no máximo `n` simultâneas. */
+async function emLotes(tarefas, n) {
+  let i = 0;
+  const trabalhador = async () => { while (i < tarefas.length) { const t = tarefas[i++]; await t(); } };
+  await Promise.all(Array.from({ length: Math.min(n, tarefas.length) }, trabalhador));
+}
+
+async function cicloMunicipal() {
+  const t0 = Date.now();
+  const fila = [];
+  const ufsMudaram = new Set();
+
+  // 1) Abrangência de cada UF: diz quais municípios mudaram desde o último ciclo.
+  await Promise.all(UFS.filter((u) => u !== 'zz').map(async (uf) => {
+    let ab;
+    try { ab = await buscarJSON(urlAbrangencia(uf)); } catch { return; }
+    for (const m of ab.abr ?? []) {
+      if (m.tpabr !== 'mun') continue;
+      const chave = `${uf}|${m.cdabr}`;
+      const sig = `${m.s?.st}|${m.ht}`;
+      if (assinaturaMun.get(chave) !== sig && infoMun.has(chave)) fila.push({ uf, tse: m.cdabr, chave, sig });
+    }
+  }));
+  if (fila.length === 0) { console.log(`[coletor] municípios: sem mudança (${Date.now() - t0}ms)`); return; }
+
+  // 2) Baixa só os municípios que mudaram.
+  let ok = 0, falhas = 0;
+  await emLotes(fila.map((item) => async () => {
+    try {
+      const r = normalizar(await buscarJSON(urlMunicipio(item.uf, item.tse)));
+      const info = infoMun.get(item.chave);
+      resultadoMun.set(info.ibge, { ...r, uf: info.uf });
+      assinaturaMun.set(item.chave, item.sig);
+      ufsMudaram.add(info.uf);
+      if (++ok % 500 === 0) console.log(`[coletor] municípios: ${ok}/${fila.length}…`);
+    } catch { falhas++; /* tenta de novo no próximo ciclo */ }
+  }), CONCORRENCIA);
+
+  // 3) Publica: arquivo completo por UF (painel da cidade) + resumo nacional (mapa).
+  const gerado = Date.now();
+  for (const uf of ufsMudaram) {
+    const m = {};
+    for (const [ibge, r] of resultadoMun) if (r.uf === uf) { const { uf: _u, ...resto } = r; m[ibge] = resto; }
+    await gravarAtomico(`municipios/${uf}.json`, { versao: 1, gerado, uf, m });
+  }
+  const resumo = {};
+  for (const [ibge, r] of resultadoMun) {
+    const ord = Object.entries(r.votos).sort((a, b) => b[1] - a[1]);
+    const total = ord.reduce((s, [, v]) => s + v, 0);
+    const pct = r.secoes ? Math.round((r.totalizadas / r.secoes) * 1000) / 10 : 0;
+    resumo[ibge] = [pct, ord[0]?.[0] ?? '', ord[0]?.[1] ?? 0, ord[1]?.[0] ?? '', ord[1]?.[1] ?? 0, total];
+  }
+  seqMun += 1;
+  await gravarAtomico('municipios-resumo.json', { versao: 1, seq: seqMun, gerado, m: resumo });
+  console.log(`[coletor] municípios publicados: ${ok} atualizados, ${falhas} falhas, ${ufsMudaram.size} UFs · ${Date.now() - t0}ms`);
+}
+
 async function main() {
   await mkdir(FEED, { recursive: true });
   await carregarEstado();
   console.log(`[coletor] ${CICLO}/${ELEICAO} turno ${TURNO} → ${FEED}`);
-  if (UMA_VEZ) { await ciclo(); return; }
+  try { await carregarConfigMun(); } catch (e) { console.warn('[coletor] config municipal indisponível:', e.message); }
+
+  if (UMA_VEZ) {
+    await ciclo();
+    if (infoMun.size) await cicloMunicipal();
+    return;
+  }
   const loop = async () => {
     try { await ciclo(); } catch (e) { console.error('[coletor] erro no ciclo:', e); }
     setTimeout(loop, INTERVALO);
   };
+  const loopMun = async () => {
+    try {
+      if (!infoMun.size) await carregarConfigMun();
+      await cicloMunicipal();
+    } catch (e) { console.error('[coletor] erro no ciclo municipal:', e); }
+    setTimeout(loopMun, MUN_INTERVALO);
+  };
   loop();
+  loopMun();
 }
 
 main();

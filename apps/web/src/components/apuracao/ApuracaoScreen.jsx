@@ -1,8 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { criarFonteDados } from './dados.js';
-import MapaBrasil, { liderDe } from './MapaBrasil.jsx';
+import { liderDe } from './MapaBrasil.jsx';
+import MapaMunicipios, { corPorMargem } from './MapaMunicipios.jsx';
+import { Avatar } from './ui.jsx';
 import { REGIOES, UF_REGIAO, UF_NOME, COR_NEUTRA } from './candidatos.js';
 import { fmtInt, fmtPct, fmtCompacto, horaBR } from './formato.js';
+
+const UFS_ORDEM = Object.keys(UF_NOME).filter((u) => u !== 'ZZ').sort((a, b) => UF_NOME[a].localeCompare(UF_NOME[b]));
+const MODOS = [
+  { id: 'municipios', label: 'Municípios' },
+  { id: 'estados', label: 'Estados' },
+  { id: 'vantagem', label: 'Vantagem' },
+  { id: 'apurado', label: 'Apurado' },
+  { id: 'candidato', label: 'Candidato' },
+];
+
+// URL: #presidente · #presidente-ba · #presidente-ba-2908200 (código IBGE)
+function lerHash() {
+  if (typeof window === 'undefined') return { uf: null, mun: null };
+  const m = window.location.hash.match(/^#presidente(?:-([a-z]{2}))?(?:-(\d{7}))?$/i);
+  if (!m) return { uf: null, mun: null };
+  return { uf: m[1] ? m[1].toUpperCase() : null, mun: m[2] || null };
+}
+const montarHash = ({ uf, mun }) => '#presidente' + (uf ? `-${uf.toLowerCase()}` : '') + (uf && mun ? `-${mun}` : '');
 
 const SERIF = { fontFamily: '"Fraunces", Georgia, "Times New Roman", serif' };
 const CARGOS = [
@@ -28,10 +48,60 @@ export default function ApuracaoScreen() {
   const [cadastro, setCadastro] = useState(null);
   const [historico, setHistorico] = useState({ pontos: [] });
   const [status, setStatus] = useState({ estado: 'conectando' });
-  const [ufSel, setUfSel] = useState(null);
+  const [sel, setSelEstado] = useState(lerHash);          // { uf, mun }
+  const [municipios, setMunicipios] = useState({ info: null, resumo: null });
+  const [munUF, setMunUF] = useState({});                 // UF → municipios/<UF>.json
+  const [modo, setModo] = useState('municipios');
+  const [candFiltro, setCandFiltro] = useState(null);
   const [feed, setFeed] = useState([]);
   const anterior = useRef(null);
   const mapaRef = useRef({});
+
+  // Seleção ↔ URL (hash). pushState para o botão Voltar do navegador funcionar.
+  const setSel = useCallback((novo) => {
+    setSelEstado((atual) => {
+      const prox = typeof novo === 'function' ? novo(atual) : novo;
+      const limpo = { uf: prox?.uf || null, mun: prox?.uf ? prox?.mun || null : null };
+      const hash = montarHash(limpo);
+      if (typeof window !== 'undefined' && window.location.hash !== hash) window.history.pushState(null, '', hash);
+      return limpo;
+    });
+  }, []);
+  useEffect(() => {
+    if (!window.location.hash) window.history.replaceState(null, '', '#presidente');
+    const aoMudar = () => setSelEstado(lerHash());
+    window.addEventListener('popstate', aoMudar);
+    window.addEventListener('hashchange', aoMudar);
+    return () => {
+      window.removeEventListener('popstate', aoMudar);
+      window.removeEventListener('hashchange', aoMudar);
+      if (/^#presidente/.test(window.location.hash)) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    };
+  }, []);
+
+  // Esc volta um nível (cidade → estado → Brasil).
+  useEffect(() => {
+    const tecla = (e) => {
+      if (e.key !== 'Escape') return;
+      setSel((s) => (s.mun ? { uf: s.uf, mun: null } : { uf: null, mun: null }));
+    };
+    window.addEventListener('keydown', tecla);
+    return () => window.removeEventListener('keydown', tecla);
+  }, [setSel]);
+
+  // Resultado completo dos municípios da UF: só carrega quando entra no estado.
+  useEffect(() => {
+    const uf = sel.uf;
+    if (!uf || uf === 'ZZ' || sim) return;
+    let vivo = true;
+    fetch(`/feed/municipios/${uf}.json`, { cache: 'no-cache' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (vivo && d) setMunUF((m) => ({ ...m, [uf]: d.m })); })
+      .catch(() => {});
+    return () => { vivo = false; };
+    // Recarrega quando o resumo municipal muda (apuração ao vivo).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel.uf, municipios.resumo]);
 
   // Dados REAIS por padrão; simulação só com ?sim=1 (demonstração fora da eleição).
   const sim = useMemo(() => {
@@ -41,9 +111,10 @@ export default function ApuracaoScreen() {
 
   useEffect(() => {
     const fonte = criarFonteDados({ sim });
-    const parar = fonte.assinar(({ agora, cadastro, historico, status }) => {
+    const parar = fonte.assinar(({ agora, cadastro, historico, status, municipios }) => {
       if (status) setStatus(status);
       if (cadastro) setCadastro(cadastro);
+      if (municipios) setMunicipios((m) => (m.info === municipios.info && m.resumo === municipios.resumo ? m : municipios));
       if (!agora) return;
       setAgora(agora);
       if (historico) setHistorico(historico);
@@ -89,17 +160,53 @@ export default function ApuracaoScreen() {
       {/* 3 colunas */}
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(320px,1fr)_minmax(0,1.4fr)_minmax(300px,1fr)] gap-px bg-[#131317]">
         <ColunaResumo br={br} rank={rank} historico={historico} data2t={cadastro?.data2t} />
-        <section className="bg-[#0b0b0d] p-4 lg:max-h-[calc(100vh-7.5rem)] lg:overflow-hidden flex flex-col">
-          <Legenda dadosUF={dadosUF} mapaCand={mapaCand} />
-          <div className="flex-1 min-h-[380px]">
-            <MapaBrasil dadosUF={dadosUF} mapaCand={mapaCand} ufSelecionada={ufSel} onSelecionarUF={(uf) => setUfSel((p) => (p === uf ? null : uf))} isDarkMode />
+        <section className="bg-[#0b0b0d] p-4 h-[72vh] lg:h-[calc(100vh-7.5rem)] flex flex-col gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <FiltrosMapa
+              modo={modo}
+              setModo={setModo}
+              candFiltro={candFiltro ?? rank[0]?.cand.numero}
+              setCandFiltro={setCandFiltro}
+              top={rank.slice(0, 2)}
+              temMunicipios={!!municipios.resumo}
+            />
+            <Legenda resumo={municipios.resumo} dadosUF={dadosUF} mapaCand={mapaCand} modo={modo} />
+          </div>
+          <Breadcrumb sel={sel} setSel={setSel} info={municipios.info} />
+          <div className="flex-1 min-h-0 relative">
+            <MapaMunicipios
+              dadosUF={dadosUF}
+              resumo={municipios.resumo}
+              info={municipios.info}
+              mapaCand={mapaCand}
+              modo={modo}
+              candidatoFiltro={candFiltro ?? rank[0]?.cand.numero}
+              ufSel={sel.uf}
+              munSel={sel.mun}
+              onSelecionar={setSel}
+            />
           </div>
         </section>
         <aside className="bg-[#0b0b0d] p-4 lg:max-h-[calc(100vh-7.5rem)] lg:overflow-y-auto space-y-5">
-          {ufSel ? (
-            <PainelEstado uf={ufSel} dados={dadosUF?.[ufSel]} lista={lista} onVoltar={() => setUfSel(null)} />
+          {sel.mun ? (
+            <PainelCidade
+              uf={sel.uf}
+              nome={municipios.info?.[sel.mun]?.[0]}
+              dados={munUF[sel.uf]?.[sel.mun]}
+              lista={lista}
+              onEstado={() => setSel({ uf: sel.uf, mun: null })}
+              onBrasil={() => setSel({ uf: null, mun: null })}
+            />
+          ) : sel.uf ? (
+            <PainelEstado
+              uf={sel.uf}
+              dados={dadosUF?.[sel.uf]}
+              lista={lista}
+              onVoltar={() => setSel({ uf: null, mun: null })}
+              onIr={(uf) => setSel({ uf, mun: null })}
+            />
           ) : (
-            <PorRegiao dadosUF={dadosUF} mapaCand={mapaCand} />
+            <PorRegiao dadosUF={dadosUF} mapaCand={mapaCand} onUF={(uf) => setSel({ uf, mun: null })} />
           )}
           <Feed feed={feed} />
         </aside>
@@ -267,32 +374,92 @@ function PorRegiao({ dadosUF, mapaCand }) {
   );
 }
 
-function PainelEstado({ uf, dados, lista, onVoltar }) {
-  const rank = rankingDe(dados, lista);
+const BOTAO_ICONE = 'w-7 h-7 rounded-md bg-[#17171c] border border-[#26262c] text-[#C9C9D1] hover:text-white hover:bg-[#202027] leading-none';
+
+function Ranking({ rank, comVotos }) {
+  return (
+    <div className="space-y-2">
+      {rank.map((r) => (
+        <div key={r.cand.numero} className="flex items-center gap-2 text-sm">
+          <Avatar cand={r.cand} tamanho={26} />
+          <div className="flex-1 min-w-0">
+            <div className="truncate text-[#C9C9D1]">{r.cand.nome} <span className="text-[#6c6c76]">· {r.cand.partido}</span></div>
+            {comVotos && <div className="text-[10px] text-[#6c6c76] tabular-nums">{fmtInt(r.votos)} votos</div>}
+          </div>
+          <span className="tabular-nums text-[#E8E8EA] font-medium">{fmtPct(r.pct)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NumerosUnidade({ d }) {
+  const ele = d?.eleitorado || 0, comp = d?.comparecimento || 0;
+  const pctDe = (v, base) => (base ? fmtPct((v / base) * 100) : '');
+  return (
+    <div className="grid grid-cols-2 gap-2 text-sm border-t border-[#1d1d22] mt-3 pt-3">
+      <Numero rotulo="Comparecimento" valor={fmtInt(comp)} sub={pctDe(comp, ele)} />
+      <Numero rotulo="Abstenção" valor={fmtInt(Math.max(0, ele - comp))} sub={pctDe(Math.max(0, ele - comp), ele)} />
+      <Numero rotulo="Brancos" valor={fmtInt(d?.brancos || 0)} sub={pctDe(d?.brancos || 0, comp)} />
+      <Numero rotulo="Nulos" valor={fmtInt(d?.nulos || 0)} sub={pctDe(d?.nulos || 0, comp)} />
+    </div>
+  );
+}
+
+function PainelEstado({ uf, dados, lista, onVoltar, onIr }) {
+  const rank = rankingDe(dados, lista).filter((r) => r.votos > 0);
   const pct = dados?.secoes ? (dados.totalizadas / dados.secoes) * 100 : 0;
+  const i = UFS_ORDEM.indexOf(uf);
+  const ir = (passo) => onIr?.(UFS_ORDEM[(i + passo + UFS_ORDEM.length) % UFS_ORDEM.length]);
   return (
     <div>
-      <button onClick={onVoltar} className="text-xs text-[#9A9AA3] hover:text-white mb-2">← Brasil › {UF_NOME[uf] || uf}</button>
-      <h3 style={SERIF} className="text-xl font-semibold">{UF_NOME[uf] || uf}</h3>
+      <div className="flex items-center justify-between mb-2">
+        <button onClick={onVoltar} className="text-xs text-[#9A9AA3] hover:text-white">← Brasil</button>
+        <div className="flex items-center gap-1">
+          {i >= 0 && <button onClick={() => ir(-1)} className={BOTAO_ICONE} aria-label="Estado anterior">‹</button>}
+          {i >= 0 && <button onClick={() => ir(1)} className={BOTAO_ICONE} aria-label="Próximo estado">›</button>}
+          <button onClick={onVoltar} className={BOTAO_ICONE} aria-label="Voltar para o Brasil">✕</button>
+        </div>
+      </div>
+      <h3 style={SERIF} className="text-2xl font-semibold">{UF_NOME[uf] || uf}</h3>
       <p className="text-xs text-[#9A9AA3] tabular-nums mb-3">
-        {fmtPct(pct, 0)} das seções · {fmtInt(dados?.eleitorado || 0)} eleitores
+        {fmtPct(pct, pct >= 100 ? 0 : 1)} das seções · {fmtInt(dados?.eleitorado || 0)} eleitores
       </p>
-      <div className="space-y-2">
-        {rank.map((r) => (
-          <div key={r.cand.numero} className="flex items-center gap-2 text-sm">
-            <Avatar cand={r.cand} tamanho={24} />
-            <span className="flex-1 truncate text-[#C9C9D1]">{r.cand.nome} <span className="text-[#6c6c76]">· {r.cand.partido}</span></span>
-            <span className="tabular-nums text-[#E8E8EA] font-medium">{fmtPct(r.pct)}</span>
-          </div>
-        ))}
+      <Ranking rank={rank} />
+      <NumerosUnidade d={dados} />
+      {uf !== 'ZZ' && <p className="text-[11px] text-[#5c5c66] mt-3">Clique num município no mapa para ver o resultado da cidade.</p>}
+    </div>
+  );
+}
+
+function PainelCidade({ uf, nome, dados, lista, onEstado, onBrasil }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5 text-xs text-[#9A9AA3]">
+          <button onClick={onBrasil} className="hover:text-white">Brasil</button>›
+          <button onClick={onEstado} className="hover:text-white">{UF_NOME[uf] || uf}</button>
+        </div>
+        <button onClick={onEstado} className={BOTAO_ICONE} aria-label="Voltar para o estado">✕</button>
       </div>
-      <div className="grid grid-cols-2 gap-2 text-sm border-t border-[#1d1d22] mt-3 pt-3">
-        <Numero rotulo="Comparecimento" valor={fmtInt(dados?.comparecimento || 0)} />
-        <Numero rotulo="Brancos" valor={fmtInt(dados?.brancos || 0)} />
-        <Numero rotulo="Nulos" valor={fmtInt(dados?.nulos || 0)} />
-        <Numero rotulo="Seções" valor={`${fmtInt(dados?.totalizadas || 0)} / ${fmtInt(dados?.secoes || 0)}`} />
-      </div>
-      <p className="text-[11px] text-[#5c5c66] mt-3">Zoom e resultado por município chegam na próxima fase.</p>
+      <h3 style={SERIF} className="text-2xl font-semibold leading-tight">{nome || 'Município'}</h3>
+      {!dados ? (
+        <div className="animate-pulse space-y-2 mt-3">
+          {[0, 1, 2].map((i) => <div key={i} className="h-6 bg-[#17171c] rounded" />)}
+        </div>
+      ) : (
+        <>
+          <p className="text-xs text-[#9A9AA3] tabular-nums">{uf} · {fmtInt(dados.eleitorado)} eleitores</p>
+          <p className="text-xs text-[#9A9AA3] tabular-nums mb-3">
+            {fmtInt(dados.totalizadas)} de {fmtInt(dados.secoes)} seções totalizadas
+          </p>
+          <Ranking rank={rankingDe(dados, lista).filter((r) => r.votos > 0)} comVotos />
+          <NumerosUnidade d={dados} />
+        </>
+      )}
+      <button onClick={onEstado} className="mt-4 w-full text-sm py-2 rounded-lg bg-[#17171c] border border-[#26262c] text-[#C9C9D1] hover:text-white hover:bg-[#202027]">
+        Voltar para {UF_NOME[uf] || uf}
+      </button>
     </div>
   );
 }
@@ -346,28 +513,6 @@ function gerarEventos(prev, novo, feedAtual, mapaCand) {
 }
 
 // ─────────────────────── Peças de UI ───────────────────────
-function Avatar({ cand, tamanho = 36 }) {
-  const [falhou, setFalhou] = useState(false);
-  const ini = String(cand.nome || '?').split(' ').map((p) => p[0]).slice(0, 2).join('');
-  const estilo = { width: tamanho, height: tamanho, borderColor: cand.cor };
-  if (cand.foto && !falhou) {
-    return (
-      <img
-        src={cand.foto}
-        alt={cand.nome}
-        onError={() => setFalhou(true)}
-        style={estilo}
-        className="rounded-full object-cover border-2 shrink-0 bg-[#1b1b20]"
-      />
-    );
-  }
-  return (
-    <div style={{ ...estilo, background: cand.cor, fontSize: tamanho * 0.34 }} className="rounded-full flex items-center justify-center font-bold text-white shrink-0">
-      {ini}
-    </div>
-  );
-}
-
 function Numero({ rotulo, valor, sub }) {
   return (
     <div>
@@ -379,27 +524,87 @@ function Numero({ rotulo, valor, sub }) {
   );
 }
 
-function Legenda({ dadosUF, mapaCand }) {
+function Legenda({ resumo, dadosUF, mapaCand, modo }) {
   const cont = useMemo(() => {
     const c = {};
-    for (const [uf, d] of Object.entries(dadosUF || {})) {
-      if (uf === 'ZZ') continue;
-      const lid = liderDe(d, mapaCand);
-      if (lid) c[lid.numero] = (c[lid.numero] || 0) + 1;
+    if (resumo) {
+      for (const r of Object.values(resumo)) if (r[5]) c[r[1]] = (c[r[1]] || 0) + 1;
+    } else {
+      for (const [uf, d] of Object.entries(dadosUF || {})) {
+        if (uf === 'ZZ') continue;
+        const l = liderDe(d, mapaCand);
+        if (l) c[l.numero] = (c[l.numero] || 0) + 1;
+      }
     }
     return c;
-  }, [dadosUF, mapaCand]);
+  }, [resumo, dadosUF, mapaCand]);
   const itens = Object.entries(cont).sort((a, b) => b[1] - a[1]);
+  const corBase = mapaCand[itens[0]?.[0]]?.cor ?? '#9CA3AF';
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#9A9AA3] mb-2">
-      <span className="text-[#6c6c76]">Estados liderados:</span>
-      {itens.length === 0 && <span>aguardando…</span>}
-      {itens.map(([num, q]) => (
-        <span key={num} className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-sm" style={{ background: mapaCand[num]?.cor }} />
-          {mapaCand[num]?.partido} · {q}
-        </span>
-      ))}
+    <div className="flex flex-col items-end gap-1 text-[11px] text-[#9A9AA3]">
+      <div className="flex items-center gap-3 tabular-nums">
+        {itens.length === 0 && <span>aguardando…</span>}
+        {itens.map(([num, q]) => (
+          <span key={num} className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ background: mapaCand[num]?.cor }} />
+            {mapaCand[num]?.partido} {fmtInt(q)}
+          </span>
+        ))}
+        {itens.length > 0 && <span className="text-[#6c6c76]">{resumo ? 'municípios' : 'estados'}</span>}
+      </div>
+      {(modo === 'municipios' || modo === 'estados') && (
+        <div className="flex items-center gap-1.5 text-[10px] text-[#6c6c76]">
+          <span className="flex">{[5, 15, 35, 60].map((m) => <span key={m} className="w-3.5 h-2" style={{ background: corPorMargem(corBase, m) }} />)}</span>
+          até 10 · 25 · 45 · mais pontos
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FiltrosMapa({ modo, setModo, candFiltro, setCandFiltro, top, temMunicipios }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 text-xs">
+      {MODOS.map((m) => {
+        const indisponivel = !temMunicipios && !['municipios', 'estados'].includes(m.id);
+        return (
+          <button
+            key={m.id}
+            disabled={indisponivel}
+            onClick={() => setModo(m.id)}
+            className={`px-2.5 py-1 rounded-md transition-colors ${modo === m.id ? 'bg-[#1f1f26] text-white font-medium' : 'text-[#8b8b95] hover:text-white'} ${indisponivel ? 'opacity-40 cursor-not-allowed' : ''}`}
+          >
+            {m.label}{m.id === 'candidato' ? ' ▾' : ''}
+          </button>
+        );
+      })}
+      {modo === 'candidato' && (
+        <select
+          value={candFiltro}
+          onChange={(e) => setCandFiltro(e.target.value)}
+          className="ml-1 bg-[#17171c] border border-[#26262c] rounded-md px-2 py-1 text-white"
+        >
+          {top.map((r) => <option key={r.cand.numero} value={r.cand.numero}>{r.cand.nome}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+function Breadcrumb({ sel, setSel, info }) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-[#8b8b95] min-h-[18px]">
+      <button onClick={() => setSel({ uf: null, mun: null })} className={!sel.uf ? 'text-white font-medium' : 'hover:text-white'}>Brasil</button>
+      {sel.uf && (
+        <>
+          <span>›</span>
+          <button onClick={() => setSel({ uf: sel.uf, mun: null })} className={!sel.mun ? 'text-white font-medium' : 'hover:text-white'}>
+            {UF_NOME[sel.uf] || sel.uf}
+          </button>
+        </>
+      )}
+      {sel.mun && (<><span>›</span><span className="text-white font-medium">{info?.[sel.mun]?.[0] || sel.mun}</span></>)}
+      {!sel.uf && <span className="ml-2 text-[#5c5c66] hidden sm:inline">Clique num estado para aproximar · roda do mouse dá zoom · arraste para mover</span>}
     </div>
   );
 }
