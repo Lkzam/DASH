@@ -84,15 +84,16 @@ export function AuthProvider({ children }) {
     }
   };
 
-  /** Grava a senha nova. Só funciona com a sessão aberta pelo link do e-mail. */
+  /**
+   * Grava a senha nova. Só funciona com a sessão aberta pelo link do e-mail.
+   *
+   * Devolve também o `code` do erro: a mensagem do Supabase vem em inglês e
+   * muda de redação entre versões, então a tela decide o texto pelo código.
+   */
   const updatePassword = async (novaSenha) => {
-    try {
-      const { error } = await supabase.auth.updateUser({ password: novaSenha });
-      if (error) throw error;
-      return { error: null };
-    } catch (error) {
-      return { error: error.message };
-    }
+    const { error } = await supabase.auth.updateUser({ password: novaSenha });
+    if (!error) return { error: null, code: null };
+    return { error: error.message, code: error.code ?? null, status: error.status ?? null };
   };
 
   const signOut = async () => {

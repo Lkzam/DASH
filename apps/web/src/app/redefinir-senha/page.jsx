@@ -13,6 +13,27 @@ import { useAuth } from '../../contexts/AuthContext';
  * a primeira; a segunda trocamos aqui por uma sessão. Sem sessão não dá para
  * trocar a senha — é isso que impede alguém de abrir esta página direto.
  */
+/**
+ * Erro do Supabase → frase em português que diz o que fazer.
+ *
+ * Decide pelo `code`, não pelo texto: a mensagem vem em inglês e já mudou de
+ * redação entre versões (foi assim que "senha igual à anterior" caiu no texto
+ * genérico). O texto só é olhado como último recurso, para versões antigas da
+ * biblioteca que ainda não mandavam código.
+ */
+function mensagemDeErro(code, status, texto = '') {
+  const t = String(texto).toLowerCase();
+  if (code === 'same_password' || /different from the old|should be different/.test(t))
+    return 'Essa é a sua senha atual. Escolha uma senha diferente da anterior.';
+  if (code === 'weak_password' || /weak|at least|6 characters/.test(t))
+    return 'Senha muito fraca. Use pelo menos 6 caracteres, misturando letras e números.';
+  if (code === 'over_request_rate_limit' || status === 429 || /rate limit/.test(t))
+    return 'Muitas tentativas seguidas. Espere um minuto e tente de novo.';
+  if (code === 'session_not_found' || status === 401 || /jwt|session|expired/.test(t))
+    return 'Seu link expirou enquanto você preenchia. Peça um link novo.';
+  return 'Não foi possível salvar a senha. Tente de novo em instantes.';
+}
+
 export default function RedefinirSenhaPage() {
   const [estado, setEstado] = useState('verificando'); // verificando | pronto | invalido | salvo
   const [senha, setSenha] = useState('');
@@ -67,12 +88,12 @@ export default function RedefinirSenhaPage() {
     if (senha !== confirmacao) { setErro('As duas senhas não são iguais.'); return; }
 
     setSalvando(true);
-    const { error } = await updatePassword(senha);
+    const { error, code, status } = await updatePassword(senha);
     setSalvando(false);
     if (error) {
-      setErro(/same|igual/i.test(error)
-        ? 'A senha nova precisa ser diferente da anterior.'
-        : 'Não foi possível salvar. Peça um link novo e tente de novo.');
+      setErro(mensagemDeErro(code, status, error));
+      // Link vencido no meio do caminho: não adianta deixar o formulário aberto.
+      if (code === 'session_not_found' || status === 401) setEstado('invalido');
       return;
     }
     setEstado('salvo');
