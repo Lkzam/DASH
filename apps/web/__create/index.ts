@@ -87,6 +87,8 @@ app.use('/api/retaguarda/chat', rateLimit({ windowMs: 60_000, max: 20 }));
 app.use('/api/check-plan', rateLimit({ windowMs: 60_000, max: 40 }));
 app.use('/api/check-retaguarda', rateLimit({ windowMs: 60_000, max: 40 }));
 app.use('/api/user/data', rateLimit({ windowMs: 60_000, max: 80 }));
+// Exclusão de conta é irreversível: poucas tentativas por minuto.
+app.use('/api/app/excluir-conta', rateLimit({ windowMs: 60_000, max: 5 }));
 // API pública do aplicativo (sem login): limite mais apertado por IP.
 app.use('/api/app/*', rateLimit({ windowMs: 60_000, max: 30 }));
 // Criar assinatura é público e cria cliente + assinatura na Asaas: sem limite,
@@ -1371,6 +1373,109 @@ async function autenticarApp(supaUrl: string, supaKey: string, authHeader: strin
     cpfHash: hashCpf(cpf),
   };
 }
+
+// ── App: excluir a própria conta ─────────────────────────────────────────────
+// Exigência das lojas (Google Play e App Store) para todo app com cadastro:
+// o usuário precisa conseguir apagar a conta de dentro do app.
+//
+// O que acontece (decisão do produto, não do código):
+//   • a conta de login, o CPF, os cupons resgatados e o saldo somem;
+//   • as RESPOSTAS de pesquisa ficam, mas deixam de apontar para a pessoa — o
+//     cpf_hash é trocado por um valor aleatório, então nem recalculando o hash
+//     do CPF dá para achá-las de novo. Assim o cliente que pagou a pesquisa não
+//     perde o resultado e a pessoa some do dado.
+//
+// Assinatura ativa é cancelada na Asaas ANTES de apagar, senão o cartão
+// continuaria sendo cobrado com a conta já inexistente.
+app.post('/api/app/excluir-conta', async (c) => {
+  const supaUrl = process.env.SUPABASE_URL!;
+  const supaKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const hdrs = {
+    apikey: supaKey, Authorization: `Bearer ${supaKey}`,
+    'Content-Type': 'application/json', Accept: 'application/json',
+  };
+
+  const base = await verificarUsuario(supaUrl, supaKey, c.req.header('Authorization') ?? '');
+  if (!base.ok) return c.json({ error: base.error }, base.status as any);
+
+  const body = await c.req.json().catch(() => ({}));
+  // Confirmação explícita: evita exclusão por clique errado ou chamada acidental.
+  if (body?.confirmacao !== 'EXCLUIR') {
+    return c.json({ error: 'Confirmação ausente.' }, 400);
+  }
+
+  const { userId, email } = base;
+
+  try {
+    // 1. CPF do perfil → hash, que é como as respostas e resgates são guardados.
+    const perfilRes = await fetch(
+      `${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${userId}&select=cpf`,
+      { headers: hdrs }
+    );
+    const perfil: any[] = perfilRes.ok ? await perfilRes.json() : [];
+    const cpf = perfil[0]?.cpf ?? null;
+    const cpfHash = cpf ? hashCpf(cpf) : null;
+
+    // 2. Cancela assinatura na Asaas antes de perder o vínculo com o e-mail.
+    const planosRes = await fetch(
+      `${supaUrl}/rest/v1/planos_usuario?email=eq.${encodeURIComponent(email)}&select=id,asaas_subscription_id,status`,
+      { headers: hdrs }
+    );
+    const planos: any[] = planosRes.ok ? await planosRes.json() : [];
+    const apiKeyAsaas = process.env.ASAAS_API_KEY;
+    const asaasUrl = process.env.ASAAS_API_URL || 'https://api.asaas.com/v3';
+    for (const plano of planos) {
+      if (!plano.asaas_subscription_id || !apiKeyAsaas) continue;
+      try {
+        const r = await fetch(`${asaasUrl}/subscriptions/${plano.asaas_subscription_id}`, {
+          method: 'DELETE',
+          headers: { access_token: apiKeyAsaas },
+        });
+        if (!r.ok) console.error(`[excluir-conta] Asaas nao cancelou ${plano.asaas_subscription_id}: ${r.status}`);
+      } catch (e) {
+        console.error('[excluir-conta] falha ao cancelar na Asaas:', e);
+      }
+    }
+
+    // 3. Desliga as respostas da pessoa (mantém o dado, corta o vínculo).
+    let respostasAnonimizadas = 0;
+    if (cpfHash) {
+      const anon = `anon:${randomBytes(16).toString('hex')}`;
+      const r = await fetch(
+        `${supaUrl}/rest/v1/app_respostas?cpf_hash=eq.${cpfHash}`,
+        { method: 'PATCH', headers: { ...hdrs, Prefer: 'return=representation' }, body: JSON.stringify({ cpf_hash: anon }) }
+      );
+      if (r.ok) respostasAnonimizadas = ((await r.json()) as any[]).length;
+      else console.error('[excluir-conta] falha ao anonimizar respostas:', await r.text());
+
+      // Resgates de cupom são benefício pessoal: somem junto com a conta.
+      await fetch(`${supaUrl}/rest/v1/cupons_resgates?cpf_hash=eq.${cpfHash}`, { method: 'DELETE', headers: hdrs });
+    }
+
+    // 4. Planos e perfil (o perfil também cairia por cascade, mas sendo
+    //    explícito a falha aparece no log em vez de passar batida).
+    await fetch(`${supaUrl}/rest/v1/planos_usuario?email=eq.${encodeURIComponent(email)}`, { method: 'DELETE', headers: hdrs });
+    await fetch(`${supaUrl}/rest/v1/perfil_usuario?user_id=eq.${userId}`, { method: 'DELETE', headers: hdrs });
+
+    // 5. Por último o login. Se isto falhar, o usuário ainda consegue entrar —
+    //    por isso é o último passo e o erro é devolvido.
+    const delUser = await fetch(`${supaUrl}/auth/v1/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` },
+    });
+    if (!delUser.ok) {
+      const detalhe = await delUser.text();
+      console.error('[excluir-conta] falha ao apagar o usuario:', detalhe);
+      return c.json({ error: 'Não foi possível concluir a exclusão. Fale com o suporte.' }, 500);
+    }
+
+    console.log(`[excluir-conta] conta ${userId} removida · ${respostasAnonimizadas} respostas anonimizadas`);
+    return c.json({ ok: true, respostasAnonimizadas });
+  } catch (e: any) {
+    console.error('[excluir-conta] erro inesperado:', e);
+    return c.json({ error: 'Não foi possível concluir a exclusão. Fale com o suporte.' }, 500);
+  }
+});
 
 // ── App: perfil da conta (CPF) ───────────────────────────────────────────────
 // Exige apenas login — NÃO exige plano. É por aqui que o app define o CPF,
