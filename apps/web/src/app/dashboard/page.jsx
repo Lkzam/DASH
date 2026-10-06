@@ -25,6 +25,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import ElectionChart from "../../components/ElectionChart";
 import AnaliseEleitoral from "../../components/AnaliseEleitoral";
+import ApuracaoScreen from "../../components/apuracao/ApuracaoScreen";
 import { useDarkMode } from "../../contexts/DarkModeContext";
 import { useAuth } from "../../contexts/AuthContext";
 import ProtectedRoute from "../../components/ProtectedRoute";
@@ -33,7 +34,10 @@ import { supabase } from "../../lib/supabaseClient";
 import { useNavigate } from "react-router-dom";
 
 function DashboardContent() {
-  const [currentScreen, setCurrentScreen] = useState("home");
+  // Link compartilhado da apuração (#presidente, #senado-ba…) abre direto nela.
+  const [currentScreen, setCurrentScreen] = useState(() =>
+    typeof window !== "undefined" && /^#(presidente|governadores|senado|deputados)/.test(window.location.hash) ? "elections" : "home"
+  );
   const [selectedRound, setSelectedRound] = useState(1);
   const { isDarkMode, toggleDarkMode } = useDarkMode();
   const { user, signOut } = useAuth();
@@ -500,7 +504,7 @@ function DashboardContent() {
     {
       id: "elections",
       icon: BarChart3,
-      label: "Eleições 2022",
+      label: "Apuração de Votos",
       active: currentScreen === "elections",
     },
     {
@@ -1858,7 +1862,7 @@ function DashboardContent() {
       case "home":
         return renderHomeScreen();
       case "elections":
-        return renderElectionsScreen();
+        return <ApuracaoScreen escuro={isDarkMode} />;
       case "map":
         return <AnaliseEleitoral />;
       case "search":
