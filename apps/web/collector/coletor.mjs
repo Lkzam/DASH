@@ -24,6 +24,7 @@
  *   TSE_ELEICAO_ESTADUAL      6259    (Governador/Senado/Deputados, 1º turno)
  *   TSE_ELEICAO_GOV           6259    (no 2º turno de governador: 6260)
  *   COLETOR_EST_INTERVALO_MS  20000   (ciclo estadual)
+ *   COLETOR_MS_ENTRE_REQ      25      (espaço mínimo entre requisições ao TSE)
  *
  * Arquivos publicados em FEED_DIR:
  *   agora.json               resultado nacional + por UF (seq/gerado)
@@ -73,7 +74,19 @@ const cacheHttp = new Map(); // url → { etag, json }
 // Freio global: se o TSE responder 429/503, ninguém busca nada até `pausaAte`.
 let pausaAte = 0;
 const pausado = () => Date.now() < pausaAte;
+// Espaça as requisições (padrão ~40/s): o TSE responde 429 a rajadas de
+// milhares em poucos segundos, como no primeiro download de municípios + fotos.
+const MS_ENTRE_REQ = Number(process.env.COLETOR_MS_ENTRE_REQ || 25);
+let proximaVez = 0;
+async function aguardarVez() {
+  const agora = Date.now();
+  const minha = Math.max(agora, proximaVez);
+  proximaVez = minha + MS_ENTRE_REQ;
+  if (minha > agora) await new Promise((r) => setTimeout(r, minha - agora));
+}
 async function buscarJSON(url) {
+  if (pausado()) throw new Error('pausa (limite do TSE)');
+  await aguardarVez();
   if (pausado()) throw new Error('pausa (limite do TSE)');
   const prev = cacheHttp.get(url);
   const ctrl = new AbortController();
@@ -156,6 +169,8 @@ const existe = (p) => access(p).then(() => true, () => false);
 async function baixarArquivo(url, destino) {
   if (await existe(destino)) return true;
   try {
+    if (pausado()) return false;
+    await aguardarVez();
     if (pausado()) return false;
     const res = await fetch(url);
     if (res.status === 429) { pausaAte = Math.max(pausaAte, Date.now() + 60_000); return false; }
@@ -489,30 +504,40 @@ async function main() {
   console.log(`[coletor] ${CICLO}/${ELEICAO} turno ${TURNO} → ${FEED}`);
   try { await carregarConfigMun(); } catch (e) { console.warn('[coletor] config municipal indisponível:', e.message); }
 
+  // Uma rodada = Presidente → estadual → municípios, em sequência (nunca em
+  // paralelo, para não somar rajadas). Estadual e municípios só rodam quando
+  // vence o intervalo deles. Se o TSE pedir pausa no meio, a rodada é retomada
+  // logo que a pausa acabar — o que faltou é buscado nela.
+  let ultimoEst = 0, ultimoMun = 0;
+  const rodada = async () => {
+    const inicio = Date.now();
+    try { await ciclo(); } catch (e) { console.error('[coletor] erro no ciclo:', e); }
+    if (Date.now() - ultimoEst >= EST_INTERVALO) {
+      try { await cicloEstadual(); ultimoEst = inicio; } catch (e) { console.error('[coletor] erro no ciclo estadual:', e); }
+    }
+    if (Date.now() - ultimoMun >= MUN_INTERVALO) {
+      try {
+        if (!infoMun.size) await carregarConfigMun();
+        await cicloMunicipal();
+        ultimoMun = inicio;
+      } catch (e) { console.error('[coletor] erro no ciclo municipal:', e); }
+    }
+    const cortada = pausaAte > inicio;
+    if (cortada) { ultimoEst = 0; ultimoMun = 0; }
+    return cortada;
+  };
+
   if (UMA_VEZ) {
-    await ciclo();
-    await cicloEstadual();
-    if (infoMun.size) await cicloMunicipal();
+    for (let i = 0; i < 6 && (await rodada()); i++) {
+      await new Promise((r) => setTimeout(r, Math.max(0, pausaAte - Date.now()) + 5000));
+    }
     return;
   }
-  const loopEst = async () => {
-    try { await cicloEstadual(); } catch (e) { console.error('[coletor] erro no ciclo estadual:', e); }
-    setTimeout(loopEst, EST_INTERVALO);
-  };
-  loopEst();
   const loop = async () => {
-    try { await ciclo(); } catch (e) { console.error('[coletor] erro no ciclo:', e); }
-    setTimeout(loop, INTERVALO);
-  };
-  const loopMun = async () => {
-    try {
-      if (!infoMun.size) await carregarConfigMun();
-      await cicloMunicipal();
-    } catch (e) { console.error('[coletor] erro no ciclo municipal:', e); }
-    setTimeout(loopMun, MUN_INTERVALO);
+    const cortada = await rodada();
+    setTimeout(loop, cortada ? Math.max(0, pausaAte - Date.now()) + 5000 : INTERVALO);
   };
   loop();
-  loopMun();
 }
 
 main();
