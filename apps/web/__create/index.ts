@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { tabelaPlanosMarkdown } from '../src/config/planos.js';
+import { KNOWLEDGE_BASE } from '../src/app/api/support/knowledge-base.js';
 import nodeConsole from 'node:console';
 import { createHash, randomBytes } from 'node:crypto';
 import { Hono } from 'hono';
@@ -271,28 +271,15 @@ if (process.env.CORS_ORIGINS) {
 // serem usados e representarem superfície de ataque (CSRF desabilitado).
 
 // ── Suporte IA ──────────────────────────────────────────────────────────────
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
-const GROQ_SYSTEM = `Você é o assistente de suporte do Opina Ai, plataforma de análise eleitoral brasileira. Responda sempre em português do Brasil, de forma clara e objetiva.
-
-REGRA ABSOLUTA: responda EXCLUSIVAMENTE sobre o Opina Ai. Para qualquer outro assunto, diga apenas: "Sou o assistente de suporte do Opina Ai e só posso ajudar com dúvidas sobre a plataforma."
-
-SOBRE O OPINA AI:
-- Plataforma de análise eleitoral com dados das eleições brasileiras (2022)
-- Mapa eleitoral interativo por estado/município
-- Formulários e pesquisas eleitorais com gráficos de resultado
-- Sistema de favoritos e saldo de moedas
-- Painel admin (Retaguarda) para gestores
-
-PLANOS (3 tiers, assinatura MENSAL recorrente via Asaas — PIX, cartão ou boleto):
-${tabelaPlanosMarkdown()}
-
-PROBLEMAS COMUNS:
-- Sem acesso após pagamento: aguarde alguns minutos e faça logout/login
-- Mapa não carrega: navegador desatualizado ou WebGL desabilitado
-- Sem acesso à Retaguarda: requer permissão de administrador
-- Formulário não aparece: crie formulários na Retaguarda primeiro
-
-Se não souber a resposta, sugira contato com o suporte. Nunca invente dados.`;
+// O que a IA sabe e pode responder vive em src/app/api/support/knowledge-base.ts
+// (fonte única — não duplicar o prompt aqui).
+//
+// Os modelos Llama saíram do catálogo da Groq e a chamada passou a devolver 404
+// "model_not_found", derrubando o chat. MODELO_RESERVA cobre o caso de o
+// principal ser aposentado também.
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const GROQ_MODEL_RESERVA = 'openai/gpt-oss-20b';
+const GROQ_SYSTEM = KNOWLEDGE_BASE;
 
 app.post('/api/support/chat', async (c) => {
   const apiKey = process.env.GROQ_API_KEY;
@@ -311,25 +298,40 @@ app.post('/api/support/chat', async (c) => {
 
   const history = messages.slice(-20).map(({ role, content }) => ({ role, content: String(content) }));
 
-  let groqRes: Response;
-  try {
-    groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const chamarGroq = (modelo: string) =>
+    fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: GROQ_MODEL,
+        model: modelo,
         max_tokens: 1024,
+        temperature: 0.3, // suporte precisa ser previsível, não criativo
         stream: true,
         messages: [{ role: 'system', content: GROQ_SYSTEM }, ...history],
       }),
     });
+
+  let groqRes: Response;
+  try {
+    groqRes = await chamarGroq(GROQ_MODEL);
+    if (groqRes.status === 404 && GROQ_MODEL !== GROQ_MODEL_RESERVA) {
+      console.error(`[suporte] modelo ${GROQ_MODEL} indisponivel — tentando ${GROQ_MODEL_RESERVA}`);
+      groqRes = await chamarGroq(GROQ_MODEL_RESERVA);
+    }
   } catch (err: any) {
-    return c.json({ error: `Falha ao conectar com Groq: ${err?.message}` }, 502);
+    console.error('[suporte] falha ao conectar na Groq:', err);
+    return c.json({ error: 'Não consegui falar com o assistente agora. Tente de novo em instantes.' }, 502);
   }
 
+  // O motivo técnico fica no log; o usuário recebe algo que ajuda a decidir o
+  // que fazer (antes vazava a resposta crua da Groq na tela).
   if (!groqRes.ok) {
     const errBody = await groqRes.text();
-    return c.json({ error: `Groq retornou ${groqRes.status}: ${errBody}` }, groqRes.status as any);
+    console.error(`[suporte] Groq ${groqRes.status}: ${errBody}`);
+    if (groqRes.status === 429) {
+      return c.json({ error: 'O assistente está com muitas conversas agora. Tente de novo em um minuto.' }, 429);
+    }
+    return c.json({ error: 'O assistente está indisponível no momento. Tente mais tarde ou fale com o suporte.' }, 502);
   }
 
   const encoder = new TextEncoder();

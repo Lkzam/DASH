@@ -3052,7 +3052,7 @@ function RetaguardaDashboardContent() {
           <div className={`font-bold text-base mr-8 ${
             isDarkMode ? 'text-white' : 'text-[#2A2E45]'
           }`}>
-            OpinaAI - Retaguarda
+            Opina Ai - Retaguarda
           </div>
 
           <div className="flex-1">

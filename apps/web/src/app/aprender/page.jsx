@@ -75,37 +75,60 @@ export default function AprenderPage() {
     },
     {
       id: 'elections',
-      titulo: 'Eleições 2022',
+      titulo: 'Apuração de Votos',
       icon: BarChart3,
       cor: '#E74C3C',
-      descricao: 'Explore os resultados das eleições presidenciais brasileiras de 2022',
+      descricao: 'Acompanhe a apuração das eleições em tempo real, com dados oficiais do TSE',
       topicos: [
         {
-          titulo: 'Visualização dos Resultados',
-          conteudo: 'Visualize os dados oficiais das eleições de 2022 em gráficos interativos.',
+          titulo: 'As quatro abas',
+          conteudo:
+            'A tela se divide em Presidente, Governadores, Senado e Deputados. Cada aba traz o mapa do país, o resumo da disputa e as últimas atualizações da apuração.',
           passos: [
-            'Acesse "Eleições 2022" no menu lateral',
-            'Escolha entre 1º ou 2º turno usando os botões superiores',
-            'Analise o gráfico de barras com os votos de cada candidato',
-            'Passe o mouse sobre as barras para ver detalhes',
+            'Acesse "Apuração de Votos" no menu lateral',
+            'Escolha a aba do cargo no topo da tela',
+            'A coluna da esquerda resume a disputa; a da direita mostra o que acabou de ser apurado',
+            'O horário da última atualização aparece no canto superior direito',
           ],
         },
         {
-          titulo: 'Dados do Primeiro Turno',
-          conteudo: 'Os dados do primeiro turno mostram todos os candidatos que concorreram.',
-          fonteDados: {
-            fonte: 'TSE — Tribunal Superior Eleitoral',
-            conjunto: 'Eleições Gerais 2022 — 1º Turno (Presidente)',
-            disponibilidade: 'Dados históricos oficiais — repositorio.tse.jus.br',
-          },
+          titulo: 'Explorar o mapa',
+          conteudo:
+            'Na aba Presidente, cada município é pintado com a cor de quem lidera ali — o tom mais forte indica vantagem maior. Nas demais abas, a cor é por estado.',
+          passos: [
+            'Passe o mouse sobre um município para ver o resultado dele na hora',
+            'Clique num estado para aproximar e ver só ele',
+            'Com o estado aberto, clique numa cidade para abrir o painel dela',
+            'Use a roda do mouse para dar zoom e arraste para mover o mapa',
+            'A tecla Esc volta um nível (cidade → estado → Brasil)',
+          ],
         },
         {
-          titulo: 'Dados do Segundo Turno',
-          conteudo: 'O segundo turno apresenta apenas os dois candidatos mais votados.',
+          titulo: 'Filtros e leitura do mapa',
+          conteudo:
+            'Os filtros acima do mapa mudam o que a cor representa, útil para enxergar padrões diferentes na mesma apuração.',
+          passos: [
+            'Municípios: cor de quem lidera em cada cidade',
+            'Estados: cor de quem lidera no estado inteiro',
+            'Vantagem: destaca onde a diferença entre os dois primeiros é maior',
+            'Apurado: mostra o quanto de cada região já foi contado',
+            'Candidato: concentra a leitura num candidato específico',
+          ],
+        },
+        {
+          titulo: 'Compartilhar o que você está vendo',
+          conteudo:
+            'O endereço da página acompanha a sua navegação. Copie a barra de endereços e envie: quem abrir vai cair exatamente no mesmo estado ou município, na mesma aba.',
+        },
+        {
+          titulo: 'De onde vêm os dados',
+          conteudo:
+            'Os números vêm direto do sistema oficial de divulgação do TSE e são atualizados sozinhos durante a apuração, sem você precisar recarregar a página.',
           fonteDados: {
             fonte: 'TSE — Tribunal Superior Eleitoral',
-            conjunto: 'Eleições Gerais 2022 — 2º Turno (Presidente)',
-            disponibilidade: 'Dados históricos oficiais — repositorio.tse.jus.br',
+            conjunto: 'Divulgação de Resultados — Eleições Gerais 2026',
+            cobertura: 'Brasil, 26 estados, Distrito Federal, 5.570 municípios e votos no exterior',
+            disponibilidade: 'Atualização automática durante a apuração — resultados.tse.jus.br',
           },
         },
       ],
@@ -188,6 +211,36 @@ export default function AprenderPage() {
             formato: 'Estruturado por pergunta e resposta com data e hora',
             acesso: 'Visível apenas para gerentes na Retaguarda',
           },
+        },
+      ],
+    },
+    {
+      id: 'requestSurvey',
+      titulo: 'Requisitar Pesquisa',
+      icon: FileText,
+      cor: '#16A085',
+      descricao: 'Peça uma pesquisa personalizada à nossa equipe',
+      topicos: [
+        {
+          titulo: 'Quem pode requisitar',
+          conteudo:
+            'A requisição de pesquisa está disponível nos planos Médio e Máximo. No plano Médio você tem uma cota mensal de pedidos; no Máximo, os pedidos são ilimitados. No plano Básico a tela não aparece no menu.',
+        },
+        {
+          titulo: 'Como fazer o pedido',
+          conteudo:
+            'Descreva o que você precisa saber e nossa equipe monta a pesquisa, aplica no aplicativo e devolve os resultados dentro da plataforma.',
+          passos: [
+            'Acesse "Requisitar Pesquisa" no menu lateral',
+            'Explique o objetivo da pesquisa e o público que quer ouvir',
+            'Informe a região de interesse (estado, cidade ou bairro)',
+            'Envie o pedido e acompanhe a situação na mesma tela',
+          ],
+        },
+        {
+          titulo: 'Acompanhando a situação',
+          conteudo:
+            'Cada pedido passa por quatro situações: Pendente (recebido), Em andamento (sendo aplicado), Concluída (resultados disponíveis) ou Rejeitada (quando não é viável). No plano Médio, todo pedido enviado conta na cota do mês, inclusive os rejeitados — em caso de recusa, fale com o suporte.',
         },
       ],
     },
@@ -304,7 +357,7 @@ export default function AprenderPage() {
             <p className={`text-sm mt-1 ${
               isDarkMode ? 'text-[#B0B5C9]' : 'text-[#8A8FA6]'
             }`}>
-              Aprenda a usar todas as funcionalidades do OpinaAI
+              Aprenda a usar todas as funcionalidades do Opina Ai
             </p>
           </div>
           <button
