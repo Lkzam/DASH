@@ -66,6 +66,35 @@ export function AuthProvider({ children }) {
     }
   };
 
+  /**
+   * Envia o e-mail de redefinição de senha.
+   *
+   * Não diz se o e-mail existe ou não: a tela sempre mostra a mesma mensagem.
+   * Confirmar a existência de uma conta entrega ao atacante metade do trabalho
+   * (saber QUEM tem conta aqui) — o Supabase também não diferencia de propósito.
+   */
+  const resetPassword = async (email) => {
+    try {
+      const redirectTo = `${window.location.origin}/redefinir-senha`;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+      if (error) throw error;
+      return { error: null };
+    } catch (error) {
+      return { error: error.message };
+    }
+  };
+
+  /** Grava a senha nova. Só funciona com a sessão aberta pelo link do e-mail. */
+  const updatePassword = async (novaSenha) => {
+    try {
+      const { error } = await supabase.auth.updateUser({ password: novaSenha });
+      if (error) throw error;
+      return { error: null };
+    } catch (error) {
+      return { error: error.message };
+    }
+  };
+
   const signOut = async () => {
     try {
       const { error } = await supabase.auth.signOut();
@@ -81,6 +110,8 @@ export function AuthProvider({ children }) {
     signUp,
     signIn,
     signOut,
+    resetPassword,
+    updatePassword,
   };
 
   return (
