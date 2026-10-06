@@ -10,8 +10,8 @@ export default function PagamentoSucessoPage() {
         {/* Logo */}
         <div className="flex justify-center mb-8">
           <div className="flex items-center gap-2">
-            <img src="/logo-branco.png" alt="OpinAI" className="w-9 h-9" />
-            <span className="font-bold text-xl text-white">OpinAI</span>
+            <img src="/logo-branco.png" alt="Opina Ai" className="w-9 h-9" />
+            <span className="font-bold text-xl text-white">Opina Ai</span>
           </div>
         </div>
 
@@ -27,7 +27,7 @@ export default function PagamentoSucessoPage() {
           </h1>
           <p className="text-[#8A8FA6] mb-8 leading-relaxed">
             Seu plano foi ativado com sucesso. Agora você pode criar sua conta ou fazer login
-            para acessar o dashboard do OpinAI.
+            para acessar o dashboard do Opina Ai.
           </p>
 
           {/* Próximos passos */}

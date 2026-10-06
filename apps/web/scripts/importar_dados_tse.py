@@ -319,7 +319,7 @@ def main():
         sys.exit(1)
 
     print('=' * 60)
-    print(f'OpinAI — Importação TSE 2022 → Supabase')
+    print(f'Opina Ai — Importação TSE 2022 → Supabase')
     print(f'Estados: {", ".join(estados)}')
     print(f'Supabase: {supa_url}')
     print(f'Batch size: {BATCH_SIZE} rows')

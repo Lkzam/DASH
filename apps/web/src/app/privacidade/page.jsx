@@ -57,7 +57,7 @@ export default function PrivacidadePage() {
             margin: '0 0 8px',
           }}
         >
-          OpinAI
+          Opina Ai
         </p>
         <h1 style={{ fontSize: 30, fontWeight: 700, color: '#0a1628', margin: '0 0 6px' }}>
           Política de Privacidade
@@ -67,11 +67,11 @@ export default function PrivacidadePage() {
         </p>
 
         <div style={{ fontSize: 15.5, lineHeight: 1.7, color: '#374151', marginTop: 24 }}>
-          Esta Política descreve como o <strong>OpinAI</strong> — sistema web
+          Esta Política descreve como o <strong>Opina Ai</strong> — sistema web
           (opina-ai.com) e aplicativo de celular — coleta, usa, armazena e protege os
           dados pessoais dos seus usuários, em conformidade com a{' '}
           <strong>Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018)</strong>.
-          Ao usar o OpinAI, você concorda com as práticas aqui descritas.
+          Ao usar o Opina Ai, você concorda com as práticas aqui descritas.
         </div>
 
         <Secao titulo="1. Quem é o responsável">
@@ -130,7 +130,7 @@ export default function PrivacidadePage() {
         </Secao>
 
         <Secao titulo="5. Com quem compartilhamos">
-          O OpinAI <strong>não vende</strong> seus dados. Eles são processados apenas
+          O Opina Ai <strong>não vende</strong> seus dados. Eles são processados apenas
           por prestadores de serviço essenciais ao funcionamento, que atuam como
           operadores:
           <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
@@ -176,7 +176,7 @@ export default function PrivacidadePage() {
         </Secao>
 
         <Secao titulo="9. Dados de menores">
-          O OpinAI não é destinado a menores de 18 anos e não coleta intencionalmente
+          O Opina Ai não é destinado a menores de 18 anos e não coleta intencionalmente
           seus dados. Caso identifiquemos um cadastro nessas condições, a conta poderá
           ser removida.
         </Secao>

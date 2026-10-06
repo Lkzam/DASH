@@ -1,5 +1,5 @@
 -- ================================================================
--- OpinAI — Tabela de Planos de Usuário
+-- Opina Ai — Tabela de Planos de Usuário
 -- Execute este SQL no Supabase: SQL Editor → New Query
 -- ================================================================
 

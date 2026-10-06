@@ -5,7 +5,7 @@ import { duracaoDias, getPlano, TIER_IDS } from '../../../../config/planos.js';
 const ASAAS_URL = process.env.ASAAS_API_URL || 'https://api.asaas.com/v3';
 
 /**
- * Confirma na Asaas que a assinatura é do OpinAI e devolve o tier dela.
+ * Confirma na Asaas que a assinatura é do Opina Ai e devolve o tier dela.
  *
  * O tier é gravado em `externalReference` quando a assinatura é criada
  * (ver criar-assinatura). Uma cobrança avulsa, ou de outro produto vendido
@@ -102,7 +102,7 @@ export async function POST(request) {
     let tier = plano?.tier ?? null;
 
     // Sem registro no banco, só ativamos se der para PROVAR que o pagamento
-    // veio de uma assinatura do OpinAI.
+    // veio de uma assinatura do Opina Ai.
     //
     // Antes, este caminho criava um plano ativo para o e-mail do pagador sem
     // verificar nada — ou seja, QUALQUER pagamento recebido nesta conta Asaas
@@ -118,7 +118,7 @@ export async function POST(request) {
       }
       const tierDaSub = await tierDaAssinatura(subId);
       if (!tierDaSub) {
-        console.warn('[asaas/webhook] assinatura sem tier do OpinAI — ignorado:', subId);
+        console.warn('[asaas/webhook] assinatura sem tier do Opina Ai — ignorado:', subId);
         return json({ received: true, action: 'ignored_sem_tier' }, 200);
       }
       tier = tierDaSub;
@@ -156,7 +156,7 @@ export async function POST(request) {
       }
     } else {
       // Chegou aqui só depois de confirmar o tier na Asaas (acima): a
-      // assinatura existe e é do OpinAI, mas o registro pendente não foi
+      // assinatura existe e é do Opina Ai, mas o registro pendente não foi
       // gravado — provavelmente falha do Supabase durante criar-assinatura.
       const { error: insErr } = await supabaseAdmin.from('planos_usuario').insert({
         email: payment.customerEmail || `asaas_${custId}`,

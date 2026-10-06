@@ -128,8 +128,8 @@ export default function PlanosPage() {
             <span className="text-sm">Voltar</span>
           </button>
           <div className="flex items-center gap-2 ml-4">
-            <img src="/logo-azul.png" alt="OpinAI" className="w-7 h-7" />
-            <span className="font-bold text-[#2A2E45]">OpinAI</span>
+            <img src="/logo-azul.png" alt="Opina Ai" className="w-7 h-7" />
+            <span className="font-bold text-[#2A2E45]">Opina Ai</span>
           </div>
         </div>
       </div>
@@ -165,7 +165,7 @@ export default function PlanosPage() {
               Escolha seu plano
             </h1>
             <p className="text-[#8A8FA6] text-center mb-10">
-              Acesso completo à plataforma OpinAI
+              Acesso completo à plataforma Opina Ai
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto mb-8">

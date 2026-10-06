@@ -3115,7 +3115,7 @@ function RetaguardaDashboardContent() {
         onClose={() => setRetaguardaChatOpen(false)}
         isDarkMode={isDarkMode}
         chatEndpoint="/api/retaguarda/chat"
-        welcomeMessage="Olá! Sou o assistente de suporte da Retaguarda do OpinAI. Como posso ajudar?"
+        welcomeMessage="Olá! Sou o assistente de suporte da Retaguarda do Opina Ai. Como posso ajudar?"
         authToken={chatToken}
       />
     </div>

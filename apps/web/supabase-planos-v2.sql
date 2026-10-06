@@ -1,5 +1,5 @@
 -- ================================================================
--- OpinAI — MIGRAÇÃO PLANOS v2 (modelo de 3 tiers)
+-- Opina Ai — MIGRAÇÃO PLANOS v2 (modelo de 3 tiers)
 -- Execute no Supabase: SQL Editor → New Query
 -- Idempotente: pode rodar mais de uma vez com segurança.
 -- ================================================================

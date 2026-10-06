@@ -1,5 +1,5 @@
 -- ================================================================
--- OpinAI — ESTADO INTERNO DO SISTEMA (chave/valor)
+-- Opina Ai — ESTADO INTERNO DO SISTEMA (chave/valor)
 -- Execute no Supabase: SQL Editor → New Query. Idempotente.
 --
 -- Tabela genérica para o servidor lembrar de coisas entre reinícios.

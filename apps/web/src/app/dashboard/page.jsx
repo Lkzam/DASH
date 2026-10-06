@@ -979,7 +979,7 @@ function DashboardContent() {
                     : 'bg-white border-[#E4E9F2] hover:border-[#1570FF]'
                 }`}
               >
-                {/* Selo de origem: deixa claro que o dado NÃO é do OpinAI */}
+                {/* Selo de origem: deixa claro que o dado NÃO é do Opina Ai */}
                 <div className="flex items-center gap-2 mb-3">
                   <span className={`text-[11px] font-semibold px-2 py-0.5 rounded inline-flex items-center gap-1 ${
                     isDarkMode ? 'bg-[#3A3E55] text-[#B0B5C9]' : 'bg-[#EDF3FF] text-[#1570FF]'

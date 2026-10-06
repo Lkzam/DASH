@@ -1,5 +1,5 @@
 -- ================================================================
--- OpinAI — MIGRAÇÃO PARA ASAAS (assinaturas recorrentes)
+-- Opina Ai — MIGRAÇÃO PARA ASAAS (assinaturas recorrentes)
 -- Execute no Supabase: SQL Editor → New Query. Idempotente.
 -- ================================================================
 

@@ -65,7 +65,7 @@ const steps = [
   {
     num: '03',
     title: 'Acesse a plataforma',
-    desc: 'Entre no dashboard e tenha acesso completo a todos os recursos do OpinAI.',
+    desc: 'Entre no dashboard e tenha acesso completo a todos os recursos do Opina Ai.',
   },
 ];
 
@@ -98,8 +98,8 @@ export default function LandingPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-md border-b border-gray-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src="/logo-azul.png" alt="OpinAI" className="w-9 h-9" />
-            <span className="font-bold text-xl text-[#2A2E45]">OpinAI</span>
+            <img src="/logo-azul.png" alt="Opina Ai" className="w-9 h-9" />
+            <span className="font-bold text-xl text-[#2A2E45]">Opina Ai</span>
           </div>
 
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-[#6F7689]">
@@ -373,7 +373,7 @@ export default function LandingPage() {
             Pronto para tomar decisões mais inteligentes?
           </h2>
           <p className="text-blue-100 text-lg mb-10">
-            Junte-se a analistas e gestores de campanha que já utilizam o OpinAI.
+            Junte-se a analistas e gestores de campanha que já utilizam o Opina Ai.
           </p>
           <div className="flex flex-wrap justify-center gap-4">
             <button
@@ -398,14 +398,14 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2">
-              <img src="/logo-branco.png" alt="OpinAI" className="w-7 h-7" />
-              <span className="font-bold text-white">OpinAI</span>
+              <img src="/logo-branco.png" alt="Opina Ai" className="w-7 h-7" />
+              <span className="font-bold text-white">Opina Ai</span>
             </div>
             <div className="flex gap-6 text-sm text-gray-500">
               <button onClick={scrollToPlanos} className="hover:text-gray-300 transition-colors">Planos</button>
               <button onClick={() => navigate('/login')} className="hover:text-gray-300 transition-colors">Entrar</button>
             </div>
-            <p className="text-gray-600 text-sm">© 2025 OpinAI · Todos os direitos reservados</p>
+            <p className="text-gray-600 text-sm">© 2025 Opina Ai · Todos os direitos reservados</p>
           </div>
         </div>
       </footer>

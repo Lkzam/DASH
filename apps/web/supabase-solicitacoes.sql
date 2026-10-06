@@ -1,5 +1,5 @@
 -- ================================================================
--- OpinAI — SOLICITAÇÕES DE PESQUISA (Fase 2)
+-- Opina Ai — SOLICITAÇÕES DE PESQUISA (Fase 2)
 -- Recurso dos planos Médio (cota mensal) e Máximo (ilimitado + prioridade).
 -- Execute no Supabase: SQL Editor → New Query. Idempotente.
 -- ================================================================

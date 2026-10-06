@@ -77,8 +77,8 @@ export default function LoginPage() {
 
         {/* Logo/Título */}
         <div className="text-center mb-8">
-          <img src="/logo-branco.png" alt="OpinAI" className="w-20 h-20 mx-auto mb-3" />
-          <h1 className="text-4xl font-bold text-white mb-2">OpinAI</h1>
+          <img src="/logo-branco.png" alt="Opina Ai" className="w-20 h-20 mx-auto mb-3" />
+          <h1 className="text-4xl font-bold text-white mb-2">Opina Ai</h1>
           <p className="text-blue-100">
             {isLogin ? 'Faça login para continuar' : 'Crie sua conta'}
           </p>
@@ -256,13 +256,13 @@ export default function LoginPage() {
             onClick={() => navigate('/planos')}
             className="text-white font-semibold text-sm hover:underline"
           >
-            Assinar o OpinAI →
+            Assinar o Opina Ai →
           </button>
         </div>
 
         {/* Footer */}
         <div className="text-center mt-6 text-blue-100 text-sm">
-          © 2025 OpinAI - Todos os direitos reservados
+          © 2025 Opina Ai - Todos os direitos reservados
         </div>
       </div>
     </div>

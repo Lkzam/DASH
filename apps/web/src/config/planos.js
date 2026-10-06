@@ -1,5 +1,5 @@
 // ============================================================================
-// OpinAI — FONTE ÚNICA DE VERDADE DOS PLANOS
+// Opina Ai — FONTE ÚNICA DE VERDADE DOS PLANOS
 // ----------------------------------------------------------------------------
 // Toda referência a preço, tier, cota ou duração deve vir DAQUI.
 // Consumido por: página /planos, landing, criar-cobranca, webhook,

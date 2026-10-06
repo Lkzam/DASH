@@ -1,5 +1,5 @@
 -- ================================================================
--- OpinAI — HARDENING DE SEGURANÇA DO BANCO
+-- Opina Ai — HARDENING DE SEGURANÇA DO BANCO
 -- Execute no Supabase: SQL Editor → New Query
 -- Corrige TODOS os alertas do Database Linter:
 --   1. "role mutable search_path" nas funções

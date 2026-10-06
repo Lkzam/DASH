@@ -1,5 +1,5 @@
 -- ================================================================
--- OpinAI — PESQUISAS EXTERNAS (dados de terceiros lançados à mão)
+-- Opina Ai — PESQUISAS EXTERNAS (dados de terceiros lançados à mão)
 -- Execute no Supabase: SQL Editor → New Query. Idempotente.
 --
 -- Contexto: até aqui a tela de Pesquisa só montava gráficos a partir das

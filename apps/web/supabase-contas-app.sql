@@ -1,5 +1,5 @@
 -- ================================================================
--- OpinAI — CONTA ÚNICA entre o site e o aplicativo
+-- Opina Ai — CONTA ÚNICA entre o site e o aplicativo
 -- Execute no Supabase: SQL Editor → New Query. Idempotente.
 --
 -- Contexto: o app deixou de ser "sem login". A partir daqui a conta é a

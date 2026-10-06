@@ -52,7 +52,7 @@ export default function AprenderPage() {
             'O saldo é atualizado em tempo real',
           ],
           fonteDados: {
-            fonte: 'Sistema OpinAI',
+            fonte: 'Sistema Opina Ai',
             descricao: 'Saldo de moedas acumulado por participação em pesquisas e formulários',
             atualizacao: 'Atualizado a cada participação',
           },
@@ -67,7 +67,7 @@ export default function AprenderPage() {
             'Remova favoritos clicando no "X" ao passar o mouse',
           ],
           fonteDados: {
-            fonte: 'Sistema OpinAI',
+            fonte: 'Sistema Opina Ai',
             descricao: 'Preferências de navegação e atalhos personalizados do usuário',
           },
         },
@@ -183,7 +183,7 @@ export default function AprenderPage() {
           titulo: 'Dados das Respostas',
           conteudo: 'As respostas são armazenadas de forma segura e associadas ao usuário que respondeu.',
           fonteDados: {
-            fonte: 'Sistema OpinAI',
+            fonte: 'Sistema Opina Ai',
             descricao: 'Respostas coletadas de pesquisas e formulários internos da plataforma',
             formato: 'Estruturado por pergunta e resposta com data e hora',
             acesso: 'Visível apenas para gerentes na Retaguarda',
@@ -213,7 +213,7 @@ export default function AprenderPage() {
           titulo: 'Dados do Usuário',
           conteudo: 'Suas informações são armazenadas de forma segura com acesso exclusivo à sua conta.',
           fonteDados: {
-            fonte: 'Conta OpinAI',
+            fonte: 'Conta Opina Ai',
             descricao: 'Nome, email e preferências pessoais do usuário',
             segurança: 'Acesso restrito — somente você pode ver e alterar seus dados',
           },
@@ -237,7 +237,7 @@ export default function AprenderPage() {
             'Usuários cadastrados nos últimos 30 dias',
           ],
           fonteDados: {
-            fonte: 'Sistema OpinAI',
+            fonte: 'Sistema Opina Ai',
             descricao: 'Métricas de crescimento e uso da plataforma em tempo real',
             acesso: 'Exclusivo para gerentes com permissão de Retaguarda',
           },
@@ -254,7 +254,7 @@ export default function AprenderPage() {
             'Clique em "Salvar Formulário"',
           ],
           fonteDados: {
-            fonte: 'Sistema OpinAI',
+            fonte: 'Sistema Opina Ai',
             descricao: 'Formulários criados pela equipe de gerência para coleta de dados internos',
             tipos_de_pergunta: 'Texto, número, email, telefone, texto longo, múltipla escolha, checkbox, data, hora',
           },
@@ -281,7 +281,7 @@ export default function AprenderPage() {
             'Você não pode revogar sua própria permissão',
           ],
           fonteDados: {
-            fonte: 'Sistema OpinAI',
+            fonte: 'Sistema Opina Ai',
             descricao: 'Controle de acesso e permissões administrativas da plataforma',
             segurança: 'Acesso restrito — somente administradores autorizados podem gerenciar permissões',
           },

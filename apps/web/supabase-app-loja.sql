@@ -1,5 +1,5 @@
 -- ============================================================
--- OpinAI — Preparação para o APP (moedas + loja de cupons)
+-- Opina Ai — Preparação para o APP (moedas + loja de cupons)
 -- Rode no Supabase SQL Editor.
 --
 -- ATENÇÃO: existia uma tabela `cupons` antiga (formato legado, com

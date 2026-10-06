@@ -1,5 +1,5 @@
 -- ============================================================
--- OpinAI — Respostas do APP (coleta pública por CPF)
+-- Opina Ai — Respostas do APP (coleta pública por CPF)
 -- Rode no Supabase SQL Editor (depois do supabase-app-loja.sql).
 -- ============================================================
 

@@ -272,11 +272,11 @@ if (process.env.CORS_ORIGINS) {
 
 // ── Suporte IA ──────────────────────────────────────────────────────────────
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
-const GROQ_SYSTEM = `Você é o assistente de suporte do OpinAI, plataforma de análise eleitoral brasileira. Responda sempre em português do Brasil, de forma clara e objetiva.
+const GROQ_SYSTEM = `Você é o assistente de suporte do Opina Ai, plataforma de análise eleitoral brasileira. Responda sempre em português do Brasil, de forma clara e objetiva.
 
-REGRA ABSOLUTA: responda EXCLUSIVAMENTE sobre o OpinAI. Para qualquer outro assunto, diga apenas: "Sou o assistente de suporte do OpinAI e só posso ajudar com dúvidas sobre a plataforma."
+REGRA ABSOLUTA: responda EXCLUSIVAMENTE sobre o Opina Ai. Para qualquer outro assunto, diga apenas: "Sou o assistente de suporte do Opina Ai e só posso ajudar com dúvidas sobre a plataforma."
 
-SOBRE O OPINAI:
+SOBRE O OPINA AI:
 - Plataforma de análise eleitoral com dados das eleições brasileiras (2022)
 - Mapa eleitoral interativo por estado/município
 - Formulários e pesquisas eleitorais com gráficos de resultado
@@ -1973,12 +1973,12 @@ app.post('/api/retaguarda/assinaturas', async (c) => {
 
 
 // ── Chat de Suporte — Retaguarda (IA especializada em gerência) ──────────────
-const GROQ_RETAGUARDA_SYSTEM = `Você é o assistente de suporte da Retaguarda do OpinAI, voltado para usuários com perfil de gerência e administração. Responda sempre em português do Brasil, de forma técnica e objetiva.
+const GROQ_RETAGUARDA_SYSTEM = `Você é o assistente de suporte da Retaguarda do Opina Ai, voltado para usuários com perfil de gerência e administração. Responda sempre em português do Brasil, de forma técnica e objetiva.
 
-REGRA ABSOLUTA: responda EXCLUSIVAMENTE sobre o OpinAI e suas funcionalidades administrativas. Para qualquer outro assunto, diga: "Sou o assistente da Retaguarda do OpinAI e só posso ajudar com questões administrativas da plataforma."
+REGRA ABSOLUTA: responda EXCLUSIVAMENTE sobre o Opina Ai e suas funcionalidades administrativas. Para qualquer outro assunto, diga: "Sou o assistente da Retaguarda do Opina Ai e só posso ajudar com questões administrativas da plataforma."
 
 SOBRE A RETAGUARDA:
-- Painel administrativo para gestores e administradores do OpinAI
+- Painel administrativo para gestores e administradores do Opina Ai
 - Acesso restrito: requer permissão concedida por outro administrador
 - Dashboard com estatísticas de usuários (total, hoje, semana, mês)
 

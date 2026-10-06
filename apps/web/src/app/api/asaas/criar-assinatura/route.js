@@ -83,7 +83,7 @@ export async function POST(request) {
         value: plan.preco / 100, // config está em centavos; Asaas usa reais
         nextDueDate: hoje,
         cycle: 'MONTHLY',
-        description: `${plan.nome} OpinAI`,
+        description: `${plan.nome} Opina Ai`,
         externalReference: tier,
       }),
     });

@@ -6,7 +6,7 @@ export default function SupportChat({
   onClose,
   isDarkMode,
   chatEndpoint = '/api/support/chat',
-  welcomeMessage = 'Olá! Sou o assistente de suporte do OpinAI. Como posso te ajudar hoje?',
+  welcomeMessage = 'Olá! Sou o assistente de suporte do Opina Ai. Como posso te ajudar hoje?',
   authToken = null,
 }) {
   const [messages, setMessages] = useState([{ role: 'assistant', content: welcomeMessage }]);
@@ -115,7 +115,7 @@ export default function SupportChat({
             <Bot className="w-4 h-4 text-white" />
           </div>
           <div>
-            <p className="text-white font-semibold text-sm leading-none">Suporte OpinAI</p>
+            <p className="text-white font-semibold text-sm leading-none">Suporte Opina Ai</p>
             <p className="text-blue-100 text-xs mt-0.5">Assistente virtual</p>
           </div>
         </div>
