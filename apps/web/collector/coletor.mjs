@@ -38,7 +38,7 @@
  *   estadual/<UF>.json       todos os candidatos da UF, por cargo
  *   fotos-e/<sqcand>.jpeg    fotos dos candidatos estaduais exibidas na tela
  */
-import { writeFile, rename, mkdir, readFile, access } from 'node:fs/promises';
+import { writeFile, rename, mkdir, readFile, access, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { corPartido } from '../src/components/apuracao/partidos.js';
 
@@ -190,6 +190,45 @@ let assinaturaAnterior = '';
 let ultimo = { br: null, uf: {} };
 let pontos = [];
 let cadastroPublicado = false;
+
+/**
+ * Trocou de turno? Então o feed guardado é de outra eleição e NÃO pode ser
+ * reaproveitado: o mapa mostraria as cores do turno anterior como se fossem
+ * de agora, e o gráfico misturaria as duas apurações.
+ *
+ * Em vez de confiar em alguém lembrar de limpar a pasta na hora da virada, o
+ * coletor grava qual eleição publicou e descarta tudo sozinho quando muda.
+ * Devolve true quando limpou.
+ */
+async function conferirEleicao() {
+  const marcador = path.join(FEED, 'eleicao.json');
+  const atual = { ciclo: CICLO, eleicao: String(ELEICAO), turno: TURNO };
+  let anterior = null;
+  try { anterior = JSON.parse(await readFile(marcador, 'utf8')); } catch { /* sem marcador */ }
+
+  // Sem marcador (feed anterior a esta checagem), o turno gravado no próprio
+  // agora.json denuncia a troca — foi o caso na virada do 1º para o 2º turno.
+  if (!anterior) {
+    try {
+      const a = JSON.parse(await readFile(path.join(FEED, 'agora.json'), 'utf8'));
+      if (a?.turno != null) anterior = { ciclo: CICLO, eleicao: a.turno === TURNO ? atual.eleicao : 'outra', turno: a.turno };
+    } catch { /* 1ª execução de verdade: nada a descartar */ }
+  }
+
+  const mudou = anterior && (anterior.eleicao !== atual.eleicao || anterior.ciclo !== atual.ciclo);
+  if (mudou) {
+    console.log(`[coletor] eleição mudou (${anterior.eleicao} → ${atual.eleicao}) — descartando o feed anterior`);
+    // As fotos ficam: são por número de candidato e o download é caro.
+    for (const alvo of ['agora.json', 'historico.json', 'candidatos.json',
+                        'municipios-resumo.json', 'municipios-info.json', 'estadual.json']) {
+      await rm(path.join(FEED, alvo), { force: true });
+    }
+    await rm(path.join(FEED, 'municipios'), { recursive: true, force: true });
+    await rm(path.join(FEED, 'estadual'), { recursive: true, force: true });
+  }
+  await gravarAtomico('eleicao.json', atual);
+  return Boolean(mudou);
+}
 
 async function carregarEstado() {
   try {
@@ -500,6 +539,7 @@ async function cicloEstadual() {
 
 async function main() {
   await mkdir(FEED, { recursive: true });
+  await conferirEleicao();
   await carregarEstado();
   console.log(`[coletor] ${CICLO}/${ELEICAO} turno ${TURNO} → ${FEED}`);
   try { await carregarConfigMun(); } catch (e) { console.warn('[coletor] config municipal indisponível:', e.message); }

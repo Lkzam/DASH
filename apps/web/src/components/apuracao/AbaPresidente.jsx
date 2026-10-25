@@ -58,7 +58,7 @@ export default function AbaPresidente({ agora, cadastro, historico, municipios, 
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(300px,340px)_minmax(0,1fr)_minmax(290px,340px)] gap-px bg-[var(--ap-gap)]">
-      <ColunaResumo br={br} rank={rank} historico={historico} data2t={cadastro?.data2t} />
+      <ColunaResumo br={br} rank={rank} historico={historico} data2t={cadastro?.data2t} turno={agora?.turno} />
       <section className="bg-[var(--ap-bg)] p-4 h-[72vh] lg:h-[calc(100vh-7.5rem)] flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <FiltrosMapa
@@ -115,7 +115,7 @@ export default function AbaPresidente({ agora, cadastro, historico, municipios, 
 }
 
 // ─────────────────────── Coluna esquerda ───────────────────────
-function ColunaResumo({ br, rank, historico, data2t }) {
+function ColunaResumo({ br, rank, historico, data2t, turno }) {
   const [verTodos, setVerTodos] = useState(false);
   const t1 = rank[0], t2 = rank[1];
   const validos = validosDe(br);
@@ -185,7 +185,7 @@ function ColunaResumo({ br, rank, historico, data2t }) {
         <Numero rotulo="Nulos" valor={fmtInt(br.nulos)} sub={br.comparecimento ? fmtPct((br.nulos / br.comparecimento) * 100) : ''} />
       </div>
 
-      <GraficoHistorico historico={historico} t1={t1} t2={t2} />
+      <GraficoHistorico historico={historico} t1={t1} t2={t2} turno={turno} />
     </section>
   );
 }
@@ -198,7 +198,7 @@ function montarManchete(br, t1, t2) {
   return [{ txt: t1.cand.nome, cor: t1.cand.cor }, { txt: ` lidera com ${fmtPct(t1.pct)}` }];
 }
 
-function GraficoHistorico({ historico, t1, t2 }) {
+function GraficoHistorico({ historico, t1, t2, turno }) {
   const pts = historico?.pontos ?? [];
   const caixa = 'rounded-xl border border-[var(--ap-borda)] bg-[var(--ap-painel)] p-3';
   if (!t1 || !t2) return null;
@@ -207,8 +207,9 @@ function GraficoHistorico({ historico, t1, t2 }) {
       <div className={caixa}>
         <div className="text-xs text-[var(--ap-mudo)] mb-1">Ao longo da apuração</div>
         <p className="text-xs text-[var(--ap-mudo2)]">
-          A curva se forma enquanto a apuração acontece ao vivo. Este turno já estava totalizado quando o
-          coletor começou a registrar — no 2º turno o gráfico vai sendo desenhado em tempo real.
+          {turno === 2
+            ? 'A curva começa a ser desenhada assim que chegar o segundo boletim. Atualiza sozinha.'
+            : 'A curva se forma enquanto a apuração acontece ao vivo. Este turno já estava totalizado quando o coletor começou a registrar.'}
         </p>
       </div>
     );
