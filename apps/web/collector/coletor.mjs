@@ -544,40 +544,42 @@ async function main() {
   console.log(`[coletor] ${CICLO}/${ELEICAO} turno ${TURNO} → ${FEED}`);
   try { await carregarConfigMun(); } catch (e) { console.warn('[coletor] config municipal indisponível:', e.message); }
 
-  // Uma rodada = Presidente → estadual → municípios, em sequência (nunca em
-  // paralelo, para não somar rajadas). Estadual e municípios só rodam quando
-  // vence o intervalo deles. Se o TSE pedir pausa no meio, a rodada é retomada
-  // logo que a pausa acabar — o que faltou é buscado nela.
-  let ultimoEst = 0, ultimoMun = 0;
-  const rodada = async () => {
-    const inicio = Date.now();
-    try { await ciclo(); } catch (e) { console.error('[coletor] erro no ciclo:', e); }
-    if (Date.now() - ultimoEst >= EST_INTERVALO) {
-      try { await cicloEstadual(); ultimoEst = inicio; } catch (e) { console.error('[coletor] erro no ciclo estadual:', e); }
-    }
-    if (Date.now() - ultimoMun >= MUN_INTERVALO) {
-      try {
-        if (!infoMun.size) await carregarConfigMun();
-        await cicloMunicipal();
-        ultimoMun = inicio;
-      } catch (e) { console.error('[coletor] erro no ciclo municipal:', e); }
-    }
-    const cortada = pausaAte > inicio;
-    if (cortada) { ultimoEst = 0; ultimoMun = 0; }
-    return cortada;
+  // Os três ciclos correm em paralelo, cada um no seu ritmo.
+  //
+  // Já estiveram em sequência, para não somar rajadas e levar 429 do TSE. Só
+  // que o ciclo municipal leva ~2,5 min (5.570 cidades) e segurava o placar
+  // nacional atrás dele: ao vivo, o gráfico andava de 2,5 em 2,5 minutos em
+  // vez dos 15 s configurados.
+  //
+  // Voltar ao paralelo é seguro porque o freio agora é global: aguardarVez()
+  // espaça TODAS as requisições (~40/s), venham do ciclo que vierem. A
+  // concorrência real não depende mais de quantos laços existem.
+  const emPausa = () => Math.max(0, pausaAte - Date.now()) + 5000;
+
+  const cicloComLoop = (nome, fn, intervalo) => {
+    const rodar = async () => {
+      const inicio = Date.now();
+      try { await fn(); } catch (e) { console.error(`[coletor] erro no ciclo ${nome}:`, e); }
+      // Cortado por pausa do TSE: tenta de novo assim que ela acabar.
+      const proximo = pausaAte > inicio ? emPausa() : intervalo;
+      setTimeout(rodar, proximo);
+    };
+    rodar();
   };
 
   if (UMA_VEZ) {
-    for (let i = 0; i < 6 && (await rodada()); i++) {
-      await new Promise((r) => setTimeout(r, Math.max(0, pausaAte - Date.now()) + 5000));
-    }
+    await ciclo();
+    await cicloEstadual();
+    if (infoMun.size) await cicloMunicipal();
     return;
   }
-  const loop = async () => {
-    const cortada = await rodada();
-    setTimeout(loop, cortada ? Math.max(0, pausaAte - Date.now()) + 5000 : INTERVALO);
-  };
-  loop();
+
+  cicloComLoop('nacional', ciclo, INTERVALO);
+  cicloComLoop('estadual', cicloEstadual, EST_INTERVALO);
+  cicloComLoop('municipal', async () => {
+    if (!infoMun.size) await carregarConfigMun();
+    await cicloMunicipal();
+  }, MUN_INTERVALO);
 }
 
 main();
